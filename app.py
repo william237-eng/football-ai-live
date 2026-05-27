@@ -5,7 +5,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from components import sidebar, header
-from components.header import get_search_query, matches_search_filter
+from components.header import get_search_query, matches_search_filter, render_datetime_header
 from components.analysis_dashboard import render_analysis_dashboard
 from services.football_api import FootballAPI, ConfigError, APIError, RateLimitError, NetworkError
 from services.live_matches import LiveMatchesService
@@ -102,6 +102,9 @@ def main():
         st.session_state.active_page = "live"
 
     api = FootballAPI()
+
+    # Afficher date/heure en haut - design premium responsive
+    render_datetime_header()
 
     sidebar.render_sidebar()
     apply_background_theme()
