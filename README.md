@@ -218,6 +218,6 @@ Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 
 ---
 
-**Made with ❤️ and ☕ by [Your Name]**
+**Made ❤️by William Eng🧑‍💻
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://your-app-name.streamlit.app/)
