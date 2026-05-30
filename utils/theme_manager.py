@@ -75,38 +75,38 @@ THEMES = {
             "text_color": "#4a4a5a",
         }
     },
-    "blue_sky": {
-        "name": "Blue Sky",
-        "icon": "🌤️",
+    "white_clean": {
+        "name": "Blanc Pur",
+        "icon": "⬜",
         "colors": {
-            "background_primary": "#f0f7ff",
-            "background_secondary": "#e6f0fa",
+            "background_primary": "#ffffff",
+            "background_secondary": "#f8f8f8",
             "background_card": "#ffffff",
-            "background_hover": "#dbeafe",
-            "background_gradient_start": "#e0f2fe",
-            "background_gradient_end": "#f0f9ff",
-            "text_primary": "#0f172a",
-            "text_secondary": "#334155",
-            "text_muted": "#64748b",
-            "border": "#bfdbfe",
-            "border_highlight": "#93c5fd",
-            "accent_primary": "#0369a1",
-            "accent_secondary": "#7c3aed",
-            "accent_success": "#059669",
+            "background_hover": "#f0f0f0",
+            "background_gradient_start": "#ffffff",
+            "background_gradient_end": "#f5f5f5",
+            "text_primary": "#111111",
+            "text_secondary": "#333333",
+            "text_muted": "#666666",
+            "border": "#dddddd",
+            "border_highlight": "#cccccc",
+            "accent_primary": "#1a56db",
+            "accent_secondary": "#6d28d9",
+            "accent_success": "#16a34a",
             "accent_warning": "#d97706",
             "accent_danger": "#dc2626",
             "accent_info": "#0284c7",
-            "shadow": "rgba(14, 165, 233, 0.1)",
-            "glass": "rgba(255, 255, 255, 0.92)",
+            "shadow": "rgba(0, 0, 0, 0.06)",
+            "glass": "rgba(255, 255, 255, 0.98)",
             "live": "#dc2626",
             "fixture": "#d97706",
-            "finished": "#059669",
+            "finished": "#16a34a",
         },
         "chart": {
-            "home_color": "#0369a1",
+            "home_color": "#1a56db",
             "away_color": "#dc2626",
-            "grid_color": "#bfdbfe",
-            "text_color": "#334155",
+            "grid_color": "#dddddd",
+            "text_color": "#333333",
         }
     }
 }
@@ -114,7 +114,8 @@ THEMES = {
 
 def get_current_theme() -> str:
     """Récupère le thème actuel depuis session_state"""
-    return st.session_state.get("theme", "dark_pro")
+    t = st.session_state.get("theme", "dark_pro")
+    return t if t in THEMES else "dark_pro"
 
 
 def set_theme(theme_name: str) -> None:
@@ -160,6 +161,8 @@ def get_theme_css(theme_name: str = None) -> str:
     
     colors = get_theme_colors(theme_name)
     is_dark = theme_name == "dark_pro"
+    is_light = theme_name in ("light_pro", "white_clean")
+    force_black = theme_name == "white_clean"
     
     return f"""
 :root {{
@@ -211,6 +214,145 @@ p, span, div {{
   color: var(--text-secondary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }}
+
+{"""
+/* ===== THEME BLANC PUR - fond blanc + textes noirs sur tout ===== */
+.stApp {
+  background: #ffffff !important;
+}
+.stApp > div, .main, .main .block-container,
+[data-testid="stAppViewContainer"], [data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"], .element-container,
+section[data-testid="stSidebar"] ~ div {
+  background: #ffffff !important;
+}
+/* Tous les textes en noir */
+.stApp *, .stMarkdown *, .stCaption,
+p, span, b, strong, em, label, div, h1, h2, h3, h4, h5, h6 {
+  color: #111111 !important;
+}
+/* Inputs fond blanc texte noir */
+.stTextInput input, .stSelectbox select,
+[data-baseweb="input"] input,
+[data-baseweb="input"] textarea {
+  background: #f0f0f0 !important;
+  color: #111111 !important;
+  border-color: #cccccc !important;
+}
+/* Selectbox / Dropdown container */
+[data-baseweb="select"] > div,
+[data-baseweb="select"] > div > div,
+[data-baseweb="select"] input {
+  background: #f0f0f0 !important;
+  color: #111111 !important;
+  border-color: #cccccc !important;
+}
+/* Liste déroulante ouverte (popover) */
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[data-baseweb="list"],
+ul[data-baseweb="menu"],
+[role="listbox"],
+[role="option"] {
+  background: #ffffff !important;
+  color: #111111 !important;
+  border-color: #cccccc !important;
+}
+[role="option"]:hover,
+[data-baseweb="menu"] li:hover {
+  background: #e8e8e8 !important;
+  color: #111111 !important;
+}
+/* Texte affiché dans la valeur sélectionnée */
+[data-baseweb="select"] span,
+[data-baseweb="select"] div[class*="ValueContainer"] span,
+[data-baseweb="select"] div[class*="singleValue"] {
+  color: #111111 !important;
+}
+/* Date input champ texte */
+.stDateInput input,
+[data-baseweb="datepicker"] input,
+[data-baseweb="calendar"] input {
+  background: #f0f0f0 !important;
+  color: #111111 !important;
+  border-color: #cccccc !important;
+}
+/* Calendrier popover - fond et texte */
+[data-baseweb="calendar"],
+[data-baseweb="datepicker"] [data-baseweb="popover"],
+[data-baseweb="datepicker"] [data-baseweb="calendar"] {
+  background: #ffffff !important;
+  color: #111111 !important;
+  border: 1px solid #cccccc !important;
+}
+/* Jours du calendrier */
+[data-baseweb="calendar"] button,
+[data-baseweb="calendar"] [role="button"],
+[data-baseweb="calendar"] td,
+[data-baseweb="calendar"] th,
+[data-baseweb="calendar"] div {
+  background: #ffffff !important;
+  color: #111111 !important;
+}
+/* Jour sélectionné */
+[data-baseweb="calendar"] [aria-selected="true"] {
+  background: #1a56db !important;
+  color: #ffffff !important;
+}
+/* Jour au survol */
+[data-baseweb="calendar"] button:hover {
+  background: #e0e8ff !important;
+  color: #111111 !important;
+}
+/* Header mois/année du calendrier */
+[data-baseweb="calendar"] [data-testid="stDateInput"] *,
+[data-baseweb="calendar"] header,
+[data-baseweb="calendar"] [role="heading"] {
+  background: #f5f5f5 !important;
+  color: #111111 !important;
+}
+/* Selectbox de période (Aujourd'hui, Demain...) */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+  background: #f0f0f0 !important;
+  color: #111111 !important;
+}
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+  background: #f0f0f0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+  color: #333333 !important;
+  background: transparent !important;
+}
+.stTabs [aria-selected="true"] {
+  background: #ffffff !important;
+  color: #111111 !important;
+}
+/* Métriques */
+[data-testid="stMetricValue"], [data-testid="stMetricLabel"],
+[data-testid="stMetricDelta"] {
+  color: #111111 !important;
+}
+/* Sidebar blanc */
+[data-testid="stSidebar"] {
+  background: #f5f5f5 !important;
+}
+[data-testid="stSidebar"] * {
+  color: #111111 !important;
+}
+/* Boutons: garder fond coloré texte blanc */
+.stButton > button {
+  color: #ffffff !important;
+}
+/* Progress bar fond gris clair */
+.stProgress {
+  background: #e0e0e0 !important;
+}
+/* Containers inline (cards matchs) */
+div[style*="background"] {
+  color: #111111 !important;
+}
+""" if force_black else ""}
 
 /* ===== GLASSMORPHISM CARDS ===== */
 .glass-card {{

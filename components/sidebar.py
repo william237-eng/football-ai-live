@@ -28,9 +28,10 @@ def render_sidebar():
 
         st.markdown("<div class='sidebar-actions'>", unsafe_allow_html=True)
 
-        # Navigation (sans recharger l'application côté utilisateur)
+        # Navigation: change de page ET vide les query_params pour quitter l'analyse
         def _set_page(page: str):
             st.session_state["active_page"] = page
+            st.query_params.clear()
 
         # Get current page for active state styling
         active_page = st.session_state.get("active_page", "live")
@@ -38,6 +39,14 @@ def render_sidebar():
         # Navigation buttons with dynamic styling based on active state
         live_type = "primary" if active_page == "live" else "secondary"
         future_type = "primary" if active_page == "future" else "secondary"
+
+        if active_page == "analysis":
+            st.markdown(
+                "<div style='font-size:0.75rem;color:#00d4ff;text-align:center;"
+                "padding:4px;border-radius:6px;background:rgba(0,212,255,0.1);"
+                "margin-bottom:6px;'>📊 Analyse en cours</div>",
+                unsafe_allow_html=True,
+            )
 
         st.button(
             "🔴 Matchs en direct",
@@ -58,6 +67,17 @@ def render_sidebar():
 
         st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- Infos live rapides ---
+        live_count = st.session_state.get("live_match_count", None)
+        if live_count is not None:
+            st.markdown(
+                f"<div style='text-align:center;background:rgba(224,36,36,0.1);border:1px solid rgba(224,36,36,0.3);"
+                f"border-radius:8px;padding:6px;margin:4px 0 8px;font-size:0.8rem;'>"
+                f"<span style='color:#e02424;font-weight:700;'>● LIVE</span> "
+                f"<span style='color:#ccc;'>{live_count} match(s)</span></div>",
+                unsafe_allow_html=True,
+            )
+
         # Theme selector in sidebar
         st.markdown("<div class='sidebar-section'>", unsafe_allow_html=True)
         st.markdown(f"<p class='sidebar-label'>🎨 Thème actuel: {theme_config['icon']} {theme_config['name']}</p>", unsafe_allow_html=True)
@@ -67,7 +87,7 @@ def render_sidebar():
         theme_options = [
             ("dark_pro", "🌙"),
             ("light_pro", "☀️"),
-            ("blue_sky", "🌤️"),
+            ("white_clean", "⬜"),
         ]
         
         for i, (theme_key, icon) in enumerate(theme_options):
@@ -87,11 +107,43 @@ def render_sidebar():
         # Quick stats section
         st.markdown("<div class='sidebar-section'>", unsafe_allow_html=True)
         st.markdown("<p class='sidebar-label'>📊 Quick Stats</p>", unsafe_allow_html=True)
-        
-        # Afficher quelques stats si disponibles
-        if "last_refresh" in st.session_state:
-            st.caption(f"Dernière maj: {st.session_state.get('last_refresh', 'N/A')}")
-        
+
+        from datetime import datetime as _dt
+        _now_str = _dt.now().strftime("%H:%M:%S")
+
+        live_count = st.session_state.get("live_match_count", None)
+        future_count = st.session_state.get("future_match_count", None)
+
+        stats_rows = []
+        if live_count is not None:
+            stats_rows.append(
+                f"<div style='display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(128,128,128,0.15);'>"
+                f"<span style='font-size:0.78rem;'>🔴 Matchs live</span>"
+                f"<span style='font-size:0.78rem;font-weight:700;color:#e02424;'>{live_count}</span>"
+                f"</div>"
+            )
+        if future_count is not None:
+            stats_rows.append(
+                f"<div style='display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(128,128,128,0.15);'>"
+                f"<span style='font-size:0.78rem;'>📅 Matchs futurs</span>"
+                f"<span style='font-size:0.78rem;font-weight:700;color:#f59e0b;'>{future_count}</span>"
+                f"</div>"
+            )
+        stats_rows.append(
+            f"<div style='display:flex;justify-content:space-between;padding:3px 0;'>"
+            f"<span style='font-size:0.75rem;color:#888;'>🕐 Màj</span>"
+            f"<span style='font-size:0.75rem;color:#888;'>{_now_str}</span>"
+            f"</div>"
+        )
+
+        if stats_rows:
+            st.markdown(
+                "<div style='padding:6px 2px;'>" + "".join(stats_rows) + "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("Aucune donnée disponible")
+
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("<div class='sidebar-footer'>© Predict IA FOOTBALL 2024</div>", unsafe_allow_html=True)
+        st.markdown("<div class='sidebar-footer'>© Predict IA FOOTBALL 2026</div>", unsafe_allow_html=True)

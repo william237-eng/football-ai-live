@@ -9,6 +9,7 @@ from ai_engine.form_analyzer import analyze_form
 from ai_engine.live_context_engine import build_live_context
 from ai_engine.probability_engine import calculate_probabilities
 from ai_engine.smart_stats_fallback import estimate_missing_stats, mark_estimated
+from ai_engine.predictions_engine import generate_full_predictions, render_predictions_section
 from services.football_api import FootballAPI
 
 
@@ -147,10 +148,22 @@ def fetch_analysis_data(fixture_id: int, home_team_id: int, away_team_id: int, l
 
 
 def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: int, league_id: int, season: int):
-    if st.button("← Retour aux matchs", use_container_width=False):
-        st.query_params.clear()
-        st.session_state["active_page"] = "live"
-        st.rerun()
+    nav_c1, nav_c2, nav_c3 = st.columns([2, 1, 1])
+    with nav_c1:
+        if st.button("\u2190 Retour aux matchés", use_container_width=True):
+            st.query_params.clear()
+            st.session_state["active_page"] = st.session_state.get("active_page", "live")
+            st.rerun()
+    with nav_c2:
+        if st.button("\U0001f534 Matchs Live", use_container_width=True):
+            st.query_params.clear()
+            st.session_state["active_page"] = "live"
+            st.rerun()
+    with nav_c3:
+        if st.button("\U0001f4c5 Matchs Futurs", use_container_width=True):
+            st.query_params.clear()
+            st.session_state["active_page"] = "future"
+            st.rerun()
 
     with st.spinner("Chargement de l'analyse réelle API-Football..."):
         data = fetch_analysis_data(fixture_id, home_team_id, away_team_id, league_id, season)
@@ -409,5 +422,23 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
     # Note sur les statistiques estimées
     if any("*" in str(v) for v in home_stats.values()) or any("*" in str(v) for v in away_stats.values()):
         st.caption("* Les statistiques marquées d'une astérisque ont été estimées intelligemment par l'IA.")
+
+    # ========== 🎯 PRÉDICTIONS AVANCÉES ==========
+    st.markdown("---")
+    
+    is_live = bool(live_context and live_context.get("minute"))
+    
+    full_predictions = generate_full_predictions(
+        home_team=home_name,
+        away_team=away_name,
+        expected_home_goals=float(ai_result.get("home_xg", 1.2)),
+        expected_away_goals=float(ai_result.get("away_xg", 1.0)),
+        home_win_prob=float(ai_result.get("home_win", 0.4)) / 100.0,
+        draw_prob=float(ai_result.get("draw", 0.3)) / 100.0,
+        away_win_prob=float(ai_result.get("away_win", 0.3)) / 100.0,
+        is_live=is_live,
+        live_context=live_context if is_live else None,
+    )
+    render_predictions_section(full_predictions, home_name, away_name)
 
     st.markdown("</div>", unsafe_allow_html=True)

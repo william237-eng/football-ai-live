@@ -45,41 +45,35 @@ def render_theme_selector():
     current_theme = get_current_theme()
     
     col1, col2, col3 = st.columns([1, 1, 1])
-    
-    theme_options = [
-        ("dark_pro", "🌙", "Dark Pro"),
-        ("light_pro", "☀️", "Light Pro"),
-        ("blue_sky", "🌤️", "Blue Sky"),
-    ]
-    
+
     with col1:
         if st.button(
-            f"🌙 Dark Pro",
+            "🌙 Dark",
             key="theme_dark",
-            type="secondary" if current_theme != "dark_pro" else "primary",
+            type="primary" if current_theme == "dark_pro" else "secondary",
             use_container_width=True
         ):
             set_theme("dark_pro")
             st.rerun()
-    
+
     with col2:
         if st.button(
-            f"☀️ Light Pro",
+            "☀️ Light",
             key="theme_light",
-            type="secondary" if current_theme != "light_pro" else "primary",
+            type="primary" if current_theme == "light_pro" else "secondary",
             use_container_width=True
         ):
             set_theme("light_pro")
             st.rerun()
-    
+
     with col3:
         if st.button(
-            f"🌤️ Blue Sky",
-            key="theme_blue",
-            type="secondary" if current_theme != "blue_sky" else "primary",
+            "⬜ Blanc",
+            key="theme_white",
+            type="primary" if current_theme == "white_clean" else "secondary",
             use_container_width=True
         ):
-            set_theme("blue_sky")
+            set_theme("white_clean")
             st.rerun()
 
 
@@ -134,7 +128,13 @@ def main():
             return
 
         analysis_fixture_id = get_query_param("analysis_fixture")
+        # Si un fixture est dans l'URL et que la page n'est PAS live/future
+        # (ou qu'elle n'a pas encore été basculée), afficher l'analyse
         if analysis_fixture_id:
+            # Auto-basculer vers "analysis" si on vient d'un lien direct (active_page = live ou future)
+            if active_page in ("live", "future"):
+                st.session_state["active_page"] = "analysis"
+                active_page = "analysis"
             try:
                 render_analysis_dashboard(
                     fixture_id=int(analysis_fixture_id),
@@ -152,143 +152,244 @@ def main():
         # Page: MATCHS FUTURS
         # =========================
         if active_page == "future":
+            now_local = datetime.now().astimezone()
+            now_ts = now_local.timestamp()
+            today = now_local.date()
+            tomorrow = today + timedelta(days=1)
+
+            # --- Filtres haut de page ---
             st.markdown("<div class='future-filters-wrap'>", unsafe_allow_html=True)
             
-            # Afficher info de recherche si active
-            search_query = get_search_query()
-            if search_query:
-                col_search, col_clear = st.columns([3, 1])
-                with col_search:
-                    st.markdown(f"🔍 Recherche: **'{search_query}'**")
-                with col_clear:
-                    if st.button("❌ Effacer", key="clear_search_future", type="secondary"):
-                        from components.header import clear_search
-                        clear_search()
-            
-            filter_opt = st.radio(
-                "Filtres",
-                ["Aujourd'hui", "Demain", "Cette semaine"],
-                horizontal=True,
-            )
+            filt_cols = st.columns([2, 2, 2])
+            with filt_cols[0]:
+                date_mode = st.selectbox(
+                    "📅 Période",
+                    ["Aujourd'hui", "Demain", "Cette semaine", "Semaine prochaine", "Date personnalisée"],
+                    key="future_date_mode",
+                    label_visibility="collapsed",
+                )
+            with filt_cols[1]:
+                if date_mode == "Date personnalisée":
+                    selected_date = st.date_input(
+                        "Date",
+                        value=today,
+                        min_value=today,
+                        max_value=today + timedelta(days=60),
+                        key="future_custom_date",
+                        label_visibility="collapsed",
+                    )
+                else:
+                    selected_date = None
+                    st.empty()
+            with filt_cols[2]:
+                search_query = get_search_query()
+                if search_query:
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        st.caption(f"🔍 Filtre: **{search_query}**")
+                    with c2:
+                        if st.button("❌", key="clr_future"):
+                            from components.header import clear_search
+                            clear_search()
+
             st.markdown("</div>", unsafe_allow_html=True)
 
-            @st.cache_data(ttl=120)
+            # --- Calcul de la plage de dates ---
+            if date_mode == "Aujourd'hui":
+                date_range = [today]
+            elif date_mode == "Demain":
+                date_range = [tomorrow]
+            elif date_mode == "Cette semaine":
+                date_range = [today + timedelta(days=i) for i in range(7)]
+            elif date_mode == "Semaine prochaine":
+                date_range = [today + timedelta(days=7 + i) for i in range(7)]
+            else:
+                date_range = [selected_date] if selected_date else [today]
+
+            # --- FETCH (TTL=60s pour aujourd'hui, 300s sinon) ---
+            _today_ttl = 60 if date_mode == "Aujourd'hui" else 300
+
+            @st.cache_data(ttl=_today_ttl)
+            def fetch_fixtures_by_date_cached(date_str: str):
+                api_inner = FootballAPI()
+                raw, meta = api_inner.get_fixtures_by_date(date_str)
+                return FutureMatchesService.parse_matches(raw), meta
+
+            @st.cache_data(ttl=300)
             def fetch_future_matches_cached():
                 api_inner = FootballAPI()
                 raw, meta = api_inner.get_future_matches()
-                parsed = FutureMatchesService.parse_matches(raw)
-                return parsed, meta
+                return FutureMatchesService.parse_matches(raw), meta
 
-            future_matches = []
-            meta = {}
+            future_matches: List[Dict[str, Any]] = []
+            meta: Dict[str, Any] = {}
             error_msg = None
 
-            with st.spinner("Récupération des matchs futurs..."):
+            with st.spinner("Chargement..."):
                 try:
-                    future_matches, meta = fetch_future_matches_cached()
+                    if date_mode in ["Aujourd'hui", "Demain", "Date personnalisée"]:
+                        future_matches, meta = fetch_fixtures_by_date_cached(date_range[0].isoformat())
+                    else:
+                        future_matches, meta = fetch_future_matches_cached()
                 except ConfigError as e:
                     error_msg = str(e)
                 except RateLimitError:
                     error_msg = "Limite API atteinte, veuillez patienter."
-                except APIError as e:
-                    error_msg = f"Erreur API : {e}"
-                except NetworkError as e:
-                    error_msg = f"Erreur réseau : {e}"
-                except requests.exceptions.Timeout:
-                    error_msg = "Délai d'attente dépassé lors de la connexion à l'API."
+                except (APIError, NetworkError) as e:
+                    error_msg = str(e)
                 except Exception as e:
-                    error_msg = f"Erreur inattendue : {e}"
+                    error_msg = str(e)
 
             if error_msg:
                 st.error(error_msg)
                 st.markdown("</div>", unsafe_allow_html=True)
                 return
 
-            if not future_matches:
-                st.info("Aucun match futur actuellement.")
-                st.markdown("</div>", unsafe_allow_html=True)
-                return
-
-            now_local = datetime.now().astimezone()
-            today = now_local.date()
-            tomorrow = today + timedelta(days=1)
-            end_of_week = today + timedelta(days=(6 - today.weekday()))  # dimanche
-
-            def _keep(match: dict) -> bool:
-                start_date_iso = match.get("start_date")  # YYYY-MM-DD
+            # --- Filtre par plage de dates ET exclure tout match déjà commencé ---
+            def _in_date_range(match: dict) -> bool:
+                start_ts = match.get("start_ts", 0)
+                start_date_iso = match.get("start_date")
                 try:
                     d = datetime.fromisoformat(start_date_iso).date()
+                    in_range = d in date_range
+                    # Exclure tout match dont l'heure de début est passée (>= maintenant)
+                    not_started = start_ts >= now_ts
+                    return in_range and not_started
                 except Exception:
                     return False
 
-                if filter_opt == "Aujourd'hui":
-                    return d == today
-                if filter_opt == "Demain":
-                    return d == tomorrow
-                return today <= d <= end_of_week
+            filtered = [m for m in future_matches if _in_date_range(m)]
+            if not filtered and date_mode not in ["Aujourd'hui", "Demain", "Date personnalisée"]:
+                filtered = [m for m in future_matches if m.get("start_ts", 0) >= now_ts]
 
-            filtered = [m for m in future_matches if _keep(m)]
-            
-            # Appliquer le filtre de recherche si présent
+            # --- Filtre recherche ---
             search_query = get_search_query()
             if search_query:
                 filtered = [m for m in filtered if matches_search_filter(m, search_query)]
-                if not filtered:
-                    st.info(f"Aucun match trouvé pour '{search_query}'.")
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    return
-            
+
             filtered.sort(key=lambda x: x.get("start_ts", 0))
+            st.session_state["future_match_count"] = len(filtered)
 
             if not filtered:
                 st.info("Aucun match pour ce filtre.")
                 st.markdown("</div>", unsafe_allow_html=True)
                 return
 
-            for index, m in enumerate(filtered):
-                home = m.get("home_team") or "—"
-                away = m.get("away_team") or "—"
-                home_logo = m.get("home_logo") or ""
-                away_logo = m.get("away_logo") or ""
-                league = m.get("league") or "—"
-                league_country = m.get("league_country") or ""
-                venue = m.get("venue") or ""
-                fixture_id = m.get("fixture_id")
-                home_team_id = m.get("home_team_id")
-                away_team_id = m.get("away_team_id")
-                league_id = m.get("league_id")
-                season = m.get("season")
-                start_time = m.get("start_time") or ""
-                start_date_display = m.get("start_date_display") or m.get("start_date") or ""
+            # --- Filtre compétitions / pays (sans re-fetch API) ---
+            all_leagues = sorted(set(m.get("league", "Autres") for m in filtered if m.get("league")))
+            all_countries = sorted(set(m.get("league_country", "") for m in filtered if m.get("league_country")))
 
-                with st.container():
-                    st.markdown("<div class='future-card-native'>", unsafe_allow_html=True)
-                    top_cols = st.columns([2, 1, 2])
-                    with top_cols[0]:
-                        if home_logo:
-                            st.image(home_logo, width=42)
-                        st.markdown(f"**{home}**")
-                    with top_cols[1]:
-                        st.markdown("<div class='future-vs-native'>VS</div>", unsafe_allow_html=True)
-                    with top_cols[2]:
-                        if away_logo:
-                            st.image(away_logo, width=42)
-                        st.markdown(f"**{away}**")
+            filter_row = st.columns([2, 2])
+            with filter_row[0]:
+                selected_league = st.selectbox(
+                    "Compétition",
+                    ["Toutes"] + all_leagues,
+                    key="future_league_filter",
+                    label_visibility="collapsed",
+                    placeholder="🏆 Toutes les compétitions",
+                )
+            with filter_row[1]:
+                selected_country = st.selectbox(
+                    "Pays",
+                    ["Tous"] + all_countries,
+                    key="future_country_filter",
+                    label_visibility="collapsed",
+                    placeholder="🌍 Tous les pays",
+                )
 
-                    st.markdown(
-                        f"<div class='future-info-native'>{start_time} · {start_date_display}<br>{league} {league_country}<br>{venue}</div>",
-                        unsafe_allow_html=True,
-                    )
+            if selected_league != "Toutes":
+                filtered = [m for m in filtered if m.get("league") == selected_league]
+            if selected_country != "Tous":
+                filtered = [m for m in filtered if m.get("league_country") == selected_country]
 
-                    disabled = not all([fixture_id, home_team_id, away_team_id, league_id, season])
-                    if st.button("📊 Analyser", key=f"future_analyze_{fixture_id}_{index}", disabled=disabled):
-                        st.query_params["analysis_fixture"] = str(fixture_id)
-                        st.query_params["home_team"] = str(home_team_id)
-                        st.query_params["away_team"] = str(away_team_id)
-                        st.query_params["league"] = str(league_id)
-                        st.query_params["season"] = str(season)
-                        st.rerun()
-                    st.markdown("</div>", unsafe_allow_html=True)
+            st.caption(f"📋 {len(filtered)} match(s) trouvé(s)")
+
+            if not filtered:
+                st.info("Aucun match pour ces filtres.")
+                st.markdown("</div>", unsafe_allow_html=True)
+                return
+
+            # --- Grouper par compétition ---
+            grouped_future: Dict[str, list] = {}
+            for m in filtered:
+                key = m.get("league") or "Autres"
+                if key not in grouped_future:
+                    grouped_future[key] = []
+                grouped_future[key].append(m)
+
+            for league_name, league_matches in grouped_future.items():
+                sample = league_matches[0]
+                league_flag = sample.get("league_flag") or ""
+                league_country = sample.get("league_country") or ""
+
+                flag_html = f"<img src='{league_flag}' width='18' style='vertical-align:middle;margin-right:6px;border-radius:2px;' onerror=\"this.style.display='none'\"/>" if league_flag else ""
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:6px;padding:8px 0 4px;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:8px;'>"
+                    f"{flag_html}<span style='font-weight:700;font-size:0.95rem;'>{league_name}</span>"
+                    f"<span style='color:#888;font-size:0.8rem;margin-left:4px;'>{league_country}</span>"
+                    f"<span style='margin-left:auto;color:#888;font-size:0.8rem;'>{len(league_matches)} match(s)</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                for index, m in enumerate(league_matches):
+                    home = m.get("home_team") or "—"
+                    away = m.get("away_team") or "—"
+                    home_logo = m.get("home_logo") or ""
+                    away_logo = m.get("away_logo") or ""
+                    league = m.get("league") or "—"
+                    venue = m.get("venue") or ""
+                    fixture_id = m.get("fixture_id")
+                    home_team_id = m.get("home_team_id")
+                    away_team_id = m.get("away_team_id")
+                    league_id_val = m.get("league_id")
+                    season = m.get("season")
+                    start_time = m.get("start_time") or ""
+                    start_date_display = m.get("start_date_display") or m.get("start_date") or ""
+
+                    with st.container():
+                        st.markdown(
+                            f"""
+                            <div style='
+                                background:linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));
+                                border:1px solid rgba(255,255,255,0.08);
+                                border-radius:12px;
+                                padding:12px 16px;
+                                margin-bottom:8px;
+                            '>""",
+                            unsafe_allow_html=True,
+                        )
+                        top_cols = st.columns([3, 1, 3, 2])
+                        with top_cols[0]:
+                            if home_logo:
+                                st.image(home_logo, width=32)
+                            st.markdown(f"**{home}**")
+                        with top_cols[1]:
+                            st.markdown(
+                                f"<div style='text-align:center;padding:6px 0;'>"
+                                f"<div style='font-size:0.7rem;color:#888;'>{start_time}</div>"
+                                f"<div style='font-weight:700;color:#00d4ff;'>VS</div>"
+                                f"<div style='font-size:0.65rem;color:#666;'>{start_date_display}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                        with top_cols[2]:
+                            if away_logo:
+                                st.image(away_logo, width=32)
+                            st.markdown(f"**{away}**")
+                        with top_cols[3]:
+                            if venue:
+                                st.caption(f"📍 {venue}")
+                            disabled = not all([fixture_id, home_team_id, away_team_id, league_id_val, season])
+                            if st.button("📊 Analyser", key=f"future_analyze_{fixture_id}_{index}", disabled=disabled, use_container_width=True):
+                                st.session_state["active_page"] = "analysis"
+                                st.query_params["analysis_fixture"] = str(fixture_id)
+                                st.query_params["home_team"] = str(home_team_id)
+                                st.query_params["away_team"] = str(away_team_id)
+                                st.query_params["league"] = str(league_id_val)
+                                st.query_params["season"] = str(season)
+                                st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown("</div>", unsafe_allow_html=True)
             return
@@ -317,6 +418,7 @@ def main():
         with st.spinner("Récupération des matchs live..."):
             try:
                 matches, meta = fetch_live_matches_cached()
+                st.session_state["live_match_count"] = len(matches)
             except ConfigError as e:
                 error_msg = str(e)
             except RateLimitError:
@@ -340,53 +442,64 @@ def main():
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
-        # Appliquer le filtre de recherche si présent
+        # --- Filtre recherche ---
         search_query = get_search_query()
         if search_query:
             matches = [m for m in matches if matches_search_filter(m, search_query)]
-            if not matches:
-                st.info(f"Aucun match live trouvé pour '{search_query}'.")
-                st.markdown("</div>", unsafe_allow_html=True)
-                return
 
-        total_matches = len(matches)
-        original_total = meta.get("total", total_matches) if meta else total_matches
         fetched_at = meta.get("fetched_at") if meta else None
 
-        # Afficher le header live avec bouton effacer recherche si nécessaire
-        header_cols = st.columns([1, 2, 1]) if not search_query else st.columns([1, 2, 1, 1])
-        
-        with header_cols[0]:
-            html = """
-            <div style='display:flex;align-items:center;gap:8px'>
-              <div style='width:14px;height:14px;border-radius:50%;background:#e02424;animation: pulse 1s infinite'></div>
-              <div style='font-weight:600'>LIVE</div>
-              <div style='margin-left:8px;color:#666'>&nbsp;•&nbsp;</div>
-              <div style='font-weight:600;margin-left:4px'>__TOTAL__</div>
-            </div>
-            <style>@keyframes pulse {0% {transform: scale(1);}50% {transform: scale(1.4);opacity:0.7;}100% {transform: scale(1);opacity:1;}}</style>
-            """
-            html = html.replace("__TOTAL__", str(total_matches))
-            st.markdown(html, unsafe_allow_html=True)
-        with header_cols[1]:
-            # Afficher info de filtrage si recherche active
+        # --- Filtres compétition / pays Live (purement local, pas d'appel API) ---
+        all_live_leagues = sorted(set(m.get("league", "") for m in matches if m.get("league")))
+        all_live_countries = sorted(set(m.get("league_country", "") for m in matches if m.get("league_country")))
+
+        live_cols = st.columns([1, 2, 2, 1])
+        with live_cols[0]:
+            st.markdown(
+                "<div style='display:flex;align-items:center;gap:6px;padding-top:8px;'>"
+                "<div style='width:10px;height:10px;border-radius:50%;background:#e02424;"
+                "animation:_lp 1s infinite'></div><b>LIVE</b></div>"
+                "<style>@keyframes _lp{0%{transform:scale(1)}50%{transform:scale(1.5);opacity:.6}100%{transform:scale(1)}}</style>",
+                unsafe_allow_html=True,
+            )
+        with live_cols[1]:
+            sel_live_league = st.selectbox(
+                "Compétition",
+                ["Toutes"] + all_live_leagues,
+                key="live_league_filter",
+                label_visibility="collapsed",
+            )
+        with live_cols[2]:
+            sel_live_country = st.selectbox(
+                "Pays",
+                ["Tous"] + all_live_countries,
+                key="live_country_filter",
+                label_visibility="collapsed",
+            )
+        with live_cols[3]:
             if search_query:
-                st.markdown(f"<div style='color:#666'>🔍 Recherche: **'{search_query}'** • {total_matches} résultat(s)</div>", unsafe_allow_html=True)
-            elif fetched_at:
-                st.markdown(f"<div style='color:#666'>Dernière mise à jour : {fetched_at}</div>", unsafe_allow_html=True)
-        
-        # Bouton effacer si recherche active
-        if search_query:
-            with header_cols[2]:
-                if st.button("❌ Effacer", key="clear_search_live", type="secondary"):
+                if st.button("❌", key="clear_search_live"):
                     from components.header import clear_search
                     clear_search()
-            with header_cols[3]:
-                st.caption(f"{total_matches}/{original_total} matchs")
-                st.markdown("<div style='color:green;font-weight:600'>API connecté</div>", unsafe_allow_html=True)
-        else:
-            with header_cols[2]:
-                st.markdown("<div style='color:green;font-weight:600'>API connecté</div>", unsafe_allow_html=True)
+
+        # Appliquer filtres locaux (pas de re-fetch)
+        if sel_live_league != "Toutes":
+            matches = [m for m in matches if m.get("league") == sel_live_league]
+        if sel_live_country != "Tous":
+            matches = [m for m in matches if m.get("league_country") == sel_live_country]
+
+        if not matches:
+            st.info("Aucun match live pour ces filtres.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        total_matches = len(matches)
+        info_parts = [f"**{total_matches}** match(s) en direct"]
+        if search_query:
+            info_parts.append(f"🔍 '{search_query}'")
+        if fetched_at:
+            info_parts.append(f"màj {fetched_at[:19]}")
+        st.caption(" · ".join(info_parts))
 
         # Group matches by competition and render list
         grouped = {}

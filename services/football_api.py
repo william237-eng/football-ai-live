@@ -261,3 +261,65 @@ class FootballAPI:
     def get_standings(self, league_id: int, season: int) -> Dict[str, Any]:
         base = f"{self.api_url.rstrip('/')}/standings"
         return self._get(base, params={"league": league_id, "season": season})
+
+    def get_fixtures_by_date(self, date: str, league_id: int = None, season: int = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Get fixtures for a specific date (YYYY-MM-DD format)."""
+        if not self.is_configured():
+            raise ConfigError("API non configurée")
+
+        base = f"{self.api_url.rstrip('/')}/fixtures"
+        params: Dict[str, Any] = {"date": date}
+        if league_id:
+            params["league"] = league_id
+        if season:
+            params["season"] = season
+
+        data = self._get(base, params=params)
+        items: List[Dict[str, Any]] = []
+        if isinstance(data, dict) and "response" in data:
+            items = data.get("response") or []
+        elif isinstance(data, list):
+            items = data
+
+        fetched_at = datetime.utcnow().isoformat() + "Z"
+        meta = {"total": len(items), "fetched_at": fetched_at}
+        return items, meta
+
+    def get_leagues(self, country: str = None, season: int = None, current: bool = True) -> Dict[str, Any]:
+        """Get available leagues/competitions."""
+        if not self.is_configured():
+            raise ConfigError("API non configurée")
+
+        base = f"{self.api_url.rstrip('/')}/leagues"
+        params: Dict[str, Any] = {}
+        if country:
+            params["country"] = country
+        if season:
+            params["season"] = season
+        if current:
+            params["current"] = "true"
+
+        return self._get(base, params=params)
+
+    def get_fixtures_next_n(self, n: int = 100, league_id: int = None, season: int = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Get next N fixtures globally or for a specific league."""
+        if not self.is_configured():
+            raise ConfigError("API non configurée")
+
+        base = f"{self.api_url.rstrip('/')}/fixtures"
+        params: Dict[str, Any] = {"next": n}
+        if league_id:
+            params["league"] = league_id
+        if season:
+            params["season"] = season
+
+        data = self._get(base, params=params)
+        items: List[Dict[str, Any]] = []
+        if isinstance(data, dict) and "response" in data:
+            items = data.get("response") or []
+        elif isinstance(data, list):
+            items = data
+
+        fetched_at = datetime.utcnow().isoformat() + "Z"
+        meta = {"total": len(items), "fetched_at": fetched_at}
+        return items, meta
