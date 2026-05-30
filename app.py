@@ -7,6 +7,10 @@ from dotenv import load_dotenv
 from components import sidebar, header
 from components.header import get_search_query, matches_search_filter, render_datetime_header
 from components.analysis_dashboard import render_analysis_dashboard
+from components.betting_page import render_betting_page
+from modules.top_over25_live.top_over25_ui import render_top_over25_page
+from modules.daily_predictions.daily_predictions_ui import render_daily_predictions_page
+from modules.history_results.history_results_ui import render_history_page
 from services.football_api import FootballAPI, ConfigError, APIError, RateLimitError, NetworkError
 from services.live_matches import LiveMatchesService
 from services.future_matches import FutureMatchesService
@@ -145,6 +149,105 @@ def main():
                 )
             except (TypeError, ValueError):
                 st.error("Paramètres d'analyse invalides.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: PARIS
+        # =========================
+        if active_page == "paris":
+            # Récupérer les matchs live et futurs pour la sélection de paris
+            @st.cache_data(ttl=30)
+            def _fetch_live_for_betting():
+                _api = FootballAPI()
+                raw, _ = _api.get_live_matches()
+                return LiveMatchesService.parse_matches(raw)
+
+            @st.cache_data(ttl=120)
+            def _fetch_future_for_betting():
+                from datetime import date, timedelta as _td
+                _api = FootballAPI()
+                _now_ts = datetime.now().timestamp()
+                collected = []
+                seen_ids = set()
+
+                # Aujourd'hui + demain par date
+                for _d in [date.today(), date.today() + _td(days=1)]:
+                    try:
+                        raw, _ = _api.get_fixtures_by_date(_d.isoformat())
+                        parsed = FutureMatchesService.parse_matches(raw)
+                        for m in parsed:
+                            fid = m.get("fixture_id")
+                            if fid and fid not in seen_ids and m.get("start_ts", 0) > _now_ts:
+                                seen_ids.add(fid)
+                                collected.append(m)
+                    except Exception:
+                        pass
+
+                # Prochains 50 matchs (couvre toute la semaine)
+                try:
+                    raw2, _ = _api.get_fixtures_next_n(n=50)
+                    parsed2 = FutureMatchesService.parse_matches(raw2)
+                    for m in parsed2:
+                        fid = m.get("fixture_id")
+                        if fid and fid not in seen_ids and m.get("start_ts", 0) > _now_ts:
+                            seen_ids.add(fid)
+                            collected.append(m)
+                except Exception:
+                    pass
+
+                # Fallback : get_future_matches standard
+                if not collected:
+                    try:
+                        raw3, _ = _api.get_future_matches()
+                        parsed3 = FutureMatchesService.parse_matches(raw3)
+                        for m in parsed3:
+                            fid = m.get("fixture_id")
+                            if fid and fid not in seen_ids and m.get("start_ts", 0) > _now_ts:
+                                seen_ids.add(fid)
+                                collected.append(m)
+                    except Exception:
+                        pass
+
+                # Trier par date de début
+                collected.sort(key=lambda x: x.get("start_ts", 0))
+                return collected
+
+            _live_bets, _future_bets = [], []
+            try:
+                _live_bets = _fetch_live_for_betting()
+            except Exception:
+                pass
+            try:
+                _future_bets = _fetch_future_for_betting()
+            except Exception:
+                pass
+
+            render_betting_page(api=api, live_matches=_live_bets, future_matches=_future_bets)
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: TOP +2.5 BUTS
+        # =========================
+        if active_page == "over25":
+            render_top_over25_page(api=api)
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: PREDICTIONS DU JOUR
+        # =========================
+        if active_page == "daily":
+            render_daily_predictions_page(api=api)
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: HISTORIQUE
+        # =========================
+        if active_page == "history":
+            render_history_page(api=api)
             st.markdown("</div>", unsafe_allow_html=True)
             return
 

@@ -4,12 +4,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import streamlit as st
 
 from ai_engine.bet_suggestion_engine import analyze_bet_opportunities
-from ai_engine.elo_rating import calculate_elo
 from ai_engine.form_analyzer import analyze_form
 from ai_engine.live_context_engine import build_live_context
-from ai_engine.probability_engine import calculate_probabilities
 from ai_engine.smart_stats_fallback import estimate_missing_stats, mark_estimated
-from ai_engine.predictions_engine import generate_full_predictions, render_predictions_section
+from ai_engine.prediction_fusion_engine import build_final_prediction
+from ai_engine.consistency_validator import validate_and_fix, get_favorite
+from ai_engine.predictions_engine import render_predictions_section
 from services.football_api import FootballAPI
 
 
@@ -17,6 +17,101 @@ def _response(data: Dict[str, Any]) -> Any:
     if isinstance(data, dict):
         return data.get("response") or []
     return data or []
+
+
+def _fusion_to_render_format(fp: Dict[str, Any], home_name: str = "", away_name: str = "") -> Dict[str, Any]:
+    """
+    Convertit le final_prediction du fusion engine vers le format
+    attendu par render_predictions_section.
+    Toutes les valeurs viennent de fp — aucun recalcul.
+    """
+    from ai_engine.confidence_engine import uniform_confidence_for_market
+
+    final_probs = fp["final_probabilities"]
+    conf = fp["final_confidence"]
+    is_live = fp.get("is_live", False)
+
+    hw = final_probs["home_win"] / 100.0
+    d  = final_probs["draw"]     / 100.0
+    aw = final_probs["away_win"] / 100.0
+
+    def _conf(prob: float):
+        return uniform_confidence_for_market(prob, conf)
+
+    result_preds = [
+        {"label": f"Victoire {home_name or 'Domicile'}", "key": "1",
+         "prob": hw, "confidence": _conf(hw)},
+        {"label": "Match nul", "key": "X",
+         "prob": d,  "confidence": _conf(d)},
+        {"label": f"Victoire {away_name or 'Extérieur'}", "key": "2",
+         "prob": aw, "confidence": _conf(aw)},
+    ]
+
+    ou = fp.get("ou_markets", {})
+    goals_preds = []
+    for th in [0.5, 1.5, 2.5, 3.5]:
+        key = str(th).replace(".", "")
+        ov = ou.get(f"over_{key}", {})
+        un = ou.get(f"under_{key}", {})
+        ov_p = ov.get("prob", 0.0)
+        un_p = un.get("prob", 0.0)
+        locked = ov.get("locked", False)
+        goals_preds.append({
+            "threshold": th,
+            "over_prob": ov_p, "under_prob": un_p,
+            "over_confidence":  (("verrouillé", "🔒", "#aaaaaa") if locked and ov_p == 1.0
+                                 else ("verrouillé", "🔒", "#555555") if locked and ov_p == 0.0
+                                 else _conf(ov_p)),
+            "under_confidence": (("verrouillé", "🔒", "#aaaaaa") if locked and un_p == 1.0
+                                 else ("verrouillé", "🔒", "#555555") if locked and un_p == 0.0
+                                 else _conf(un_p)),
+            "locked": locked,
+            "reason": ov.get("reason", ""),
+        })
+
+    btts = fp.get("btts", {})
+    btts_locked = btts.get("locked", False)
+    btts_preds = {
+        "yes_prob": btts.get("yes_prob", 0.0),
+        "no_prob":  btts.get("no_prob",  0.0),
+        "yes_confidence": (("verrouillé", "🔒", "#aaaaaa") if btts_locked else _conf(btts.get("yes_prob", 0.0))),
+        "no_confidence":  (("verrouillé", "🔒", "#555555") if btts_locked else _conf(btts.get("no_prob",  0.0))),
+        "locked": btts_locked,
+        "reason": btts.get("reason", ""),
+    }
+
+    ng = fp.get("next_goal", {})
+    next_goal = {
+        "home_prob":    ng.get("home_prob", 0.5),
+        "away_prob":    ng.get("away_prob", 0.5),
+        "no_goal_prob": ng.get("no_goal_prob", 0.1),
+        "home_name": ng.get("home_name", ""),
+        "away_name": ng.get("away_name", ""),
+        "home_confidence": _conf(ng.get("home_prob", 0.5)),
+        "away_confidence": _conf(ng.get("away_prob", 0.5)),
+    }
+
+    return {
+        "result":           result_preds,
+        "goals":            goals_preds,
+        "btts":             btts_preds,
+        "team_goals":       fp.get("team_goals", {}),
+        "halftime":         fp.get("halftime", {}),
+        "corners":          fp.get("corners", {}),
+        "cards":            fp.get("cards", {}),
+        "next_goal":        next_goal,
+        "top_scores":       fp.get("final_score_predictions", []),
+        "confidence_overall": conf,
+        "momentum":         fp.get("momentum", {}),
+        "pressure":         fp.get("pressure", {}),
+        "conclusion":       fp.get("final_conclusion", ""),
+        "expected_home_goals": fp.get("home_xg", 0),
+        "expected_away_goals": fp.get("away_xg", 0),
+        "home_goals":  fp.get("home_goals", 0),
+        "away_goals":  fp.get("away_goals", 0),
+        "minute":      fp.get("minute", 0),
+        "is_live":     is_live,
+    }
 
 
 def _first_response(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -130,9 +225,28 @@ def _standing_for_team(standings_data: Dict[str, Any], team_id: int) -> Dict[str
     return {}
 
 
-@st.cache_data(ttl=180)
+@st.cache_data(ttl=30)
+def fetch_analysis_data_live(fixture_id: int, home_team_id: int, away_team_id: int, league_id: int, season: int) -> Dict[str, Any]:
+    """Cache court (30s) pour matchs en cours."""
+    api = FootballAPI(timeout=15, max_retries=3)
+    return {
+        "fixture": api.get_fixture_detail(fixture_id),
+        "statistics": api.get_fixture_statistics(fixture_id),
+        "events": api.get_fixture_events(fixture_id),
+        "lineups": api.get_fixture_lineups(fixture_id),
+        "home_recent": api.get_team_recent_fixtures(home_team_id, 5),
+        "away_recent": api.get_team_recent_fixtures(away_team_id, 5),
+        "home_team_stats": api.get_team_statistics(league_id, season, home_team_id),
+        "away_team_stats": api.get_team_statistics(league_id, season, away_team_id),
+        "h2h": api.get_head_to_head(home_team_id, away_team_id, 5),
+        "standings": api.get_standings(league_id, season),
+    }
+
+
+@st.cache_data(ttl=300)
 def fetch_analysis_data(fixture_id: int, home_team_id: int, away_team_id: int, league_id: int, season: int) -> Dict[str, Any]:
-    api = FootballAPI(timeout=12, max_retries=3)
+    """Cache long (5min) pour matchs futurs/termines."""
+    api = FootballAPI(timeout=15, max_retries=3)
     return {
         "fixture": api.get_fixture_detail(fixture_id),
         "statistics": api.get_fixture_statistics(fixture_id),
@@ -166,7 +280,17 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
             st.rerun()
 
     with st.spinner("Chargement de l'analyse réelle API-Football..."):
-        data = fetch_analysis_data(fixture_id, home_team_id, away_team_id, league_id, season)
+        # Première récupération rapide pour détecter si le match est live
+        _quick = fetch_analysis_data_live(fixture_id, home_team_id, away_team_id, league_id, season)
+        _quick_fixture = (_quick.get("fixture") or {})
+        _quick_resp = _quick_fixture.get("response") or []
+        _quick_status = {}
+        if isinstance(_quick_resp, list) and _quick_resp:
+            _quick_status = (_quick_resp[0] or {}).get("fixture", {}).get("status", {})
+        elif isinstance(_quick_resp, dict):
+            _quick_status = _quick_resp.get("fixture", {}).get("status", {})
+        _match_is_live = _quick_status.get("short", "") in ("1H", "2H", "HT", "ET", "BT", "P", "SUSP", "INT", "LIVE")
+        data = _quick  # réutiliser les données déjà récupérées
 
     fixture = _first_response(data["fixture"])
     fixture_info = fixture.get("fixture") or {}
@@ -199,6 +323,7 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
     stats_items = _response(data["statistics"])
     home_stats = _stat_map(stats_items[0]) if isinstance(stats_items, list) and len(stats_items) > 0 else {}
     away_stats = _stat_map(stats_items[1]) if isinstance(stats_items, list) and len(stats_items) > 1 else {}
+
     stat_names = [
         ("Possession", ["Ball Possession", "Possession"], "Non disponible"),
         ("Tirs", ["Total Shots", "Shots Total", "Total shots"], 0),
@@ -211,17 +336,86 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
     ]
 
     st.markdown("### 📊 Statistiques match")
-    for name, aliases, fallback in stat_names:
-        left = _stat_value(home_stats, aliases, fallback)
-        right = _stat_value(away_stats, aliases, fallback)
-        left_num = _num(left)
-        right_num = _num(right)
-        total = max(left_num + right_num, 1)
-        st.markdown(f"**{name}**")
-        cols = st.columns([1, 3, 1])
-        cols[0].metric(home_name, _display_value(left))
-        cols[1].progress(min(left_num / total, 1.0))
-        cols[2].metric(away_name, _display_value(right))
+
+    if home_stats or away_stats:
+        # Stats live/terminées disponibles
+        for name, aliases, fallback in stat_names:
+            left = _stat_value(home_stats, aliases, fallback)
+            right = _stat_value(away_stats, aliases, fallback)
+            left_num = _num(left)
+            right_num = _num(right)
+            total = max(left_num + right_num, 1)
+            st.markdown(f"**{name}**")
+            cols = st.columns([1, 3, 1])
+            cols[0].metric(home_name, _display_value(left))
+            cols[1].progress(min(left_num / total, 1.0))
+            cols[2].metric(away_name, _display_value(right))
+    else:
+        # Stats de match non disponibles → afficher les stats de saison des équipes
+        home_payload = _team_stat_payload(data.get("home_team_stats", {}))
+        away_payload = _team_stat_payload(data.get("away_team_stats", {}))
+
+        def _season_val(payload: dict, *path):
+            """Navigue dans un dict imbriqué par chemin de clés."""
+            cur = payload
+            for k in path:
+                if not isinstance(cur, dict):
+                    return None
+                cur = cur.get(k)
+            return cur
+
+        if home_payload or away_payload:
+            st.caption("📈 *Statistiques de saison (stats du match non encore disponibles)*")
+
+            season_stats = [
+                ("Matchs joués",
+                 _season_val(home_payload, "fixtures", "played", "total"),
+                 _season_val(away_payload, "fixtures", "played", "total")),
+                ("Victoires",
+                 _season_val(home_payload, "fixtures", "wins", "total"),
+                 _season_val(away_payload, "fixtures", "wins", "total")),
+                ("Défaites",
+                 _season_val(home_payload, "fixtures", "loses", "total"),
+                 _season_val(away_payload, "fixtures", "loses", "total")),
+                ("Buts marqués (saison)",
+                 _season_val(home_payload, "goals", "for", "total", "total"),
+                 _season_val(away_payload, "goals", "for", "total", "total")),
+                ("Buts encaissés (saison)",
+                 _season_val(home_payload, "goals", "against", "total", "total"),
+                 _season_val(away_payload, "goals", "against", "total", "total")),
+                ("Moy. buts marqués/match",
+                 _season_val(home_payload, "goals", "for", "average", "total"),
+                 _season_val(away_payload, "goals", "for", "average", "total")),
+                ("Moy. buts encaissés/match",
+                 _season_val(home_payload, "goals", "against", "average", "total"),
+                 _season_val(away_payload, "goals", "against", "average", "total")),
+                ("Clean sheets",
+                 _season_val(home_payload, "clean_sheet", "total"),
+                 _season_val(away_payload, "clean_sheet", "total")),
+                ("Buts en 1ère MT",
+                 _season_val(home_payload, "goals", "for", "minute", "0-15", "total"),
+                 _season_val(away_payload, "goals", "for", "minute", "0-15", "total")),
+            ]
+
+            for name, lv, rv in season_stats:
+                lv_str = str(lv) if lv is not None else "—"
+                rv_str = str(rv) if rv is not None else "—"
+                try:
+                    lv_num = float(str(lv).replace("%", "")) if lv is not None else 0
+                    rv_num = float(str(rv).replace("%", "")) if rv is not None else 0
+                except (ValueError, TypeError):
+                    lv_num = rv_num = 0
+                total_s = max(lv_num + rv_num, 0.01)
+                st.markdown(f"**{name}**")
+                cols = st.columns([1, 3, 1])
+                cols[0].metric(home_name, lv_str)
+                if lv_num + rv_num > 0:
+                    cols[1].progress(min(lv_num / total_s, 1.0))
+                else:
+                    cols[1].progress(0.0)
+                cols[2].metric(away_name, rv_str)
+        else:
+            st.info("⚠️ Aucune statistique disponible pour ce match ou ces équipes via l'API.")
 
     home_recent = _response(data["home_recent"])
     away_recent = _response(data["away_recent"])
@@ -258,10 +452,7 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
     home_stats = mark_estimated(estimated_stats["home"], original_home_stats)
     away_stats = mark_estimated(estimated_stats["away"], original_away_stats)
 
-    home_elo = calculate_elo(home_form, home_advantage=True)
-    away_elo = calculate_elo(away_form, home_advantage=False)
-
-    # Build live context for real-time analysis
+    # ── Build live context ────────────────────────────────────────────────────
     current_home_goals = goals.get("home") or 0
     current_away_goals = goals.get("away") or 0
     minute = status.get("elapsed") or 0
@@ -277,9 +468,36 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
         away_stats=away_stats,
         events=events,
     )
+    is_live = _match_is_live or bool(live_context and live_context.get("is_live"))
 
-    ai_result = calculate_probabilities(home_form, away_form, home_elo, away_elo, live_context)
+    # ══════════════════════════════════════════════════════════════════════════
+    # FUSION ENGINE — UN SEUL CALCUL, UNE SEULE VÉRITÉ
+    # ══════════════════════════════════════════════════════════════════════════
+    raw_prediction = build_final_prediction(
+        home_team=home_name,
+        away_team=away_name,
+        home_form=home_form,
+        away_form=away_form,
+        home_team_id=home_team_id,
+        away_team_id=away_team_id,
+        home_stats=home_stats,
+        away_stats=away_stats,
+        events=events,
+        h2h_data=_response(data.get("h2h", {})),
+        standings=data.get("standings"),
+        live_context=live_context if is_live else None,
+        is_live=is_live,
+    )
+    fp = validate_and_fix(raw_prediction)
 
+    # Source unique utilisée partout ci-dessous
+    final_probs  = fp["final_probabilities"]
+    final_scores = fp["final_score_predictions"]
+    final_conf   = fp["final_confidence"]
+    final_conc   = fp["final_conclusion"]
+    consistency_warns = fp.get("consistency_warnings", [])
+
+    # ── Forme récente ─────────────────────────────────────────────────────────
     st.markdown("### 🔥 Forme récente")
     col_home, col_away = st.columns(2)
     for col, title, form in [(col_home, home_name, home_form), (col_away, away_name, away_form)]:
@@ -295,15 +513,17 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
             for row in form["rows"]:
                 st.write(f"{row['result']} · {row['opponent']} · {row['score']}")
 
+    # ── H2H ──────────────────────────────────────────────────────────────────
     st.markdown("### ⚔️ Head to Head")
     h2h_items = _response(data["h2h"])
     if h2h_items:
         for item in h2h_items[:5]:
             item_teams = item.get("teams") or {}
-            st.write(f"{(item_teams.get('home') or {}).get('name', '—')} { _fixture_score(item) } {(item_teams.get('away') or {}).get('name', '—')}")
+            st.write(f"{(item_teams.get('home') or {}).get('name', '—')} {_fixture_score(item)} {(item_teams.get('away') or {}).get('name', '—')}")
     else:
         st.info("Aucune confrontation directe disponible via l'API.")
 
+    # ── Classement ───────────────────────────────────────────────────────────
     st.markdown("### 🏆 Classement")
     home_standing = _standing_for_team(data["standings"], home_team_id)
     away_standing = _standing_for_team(data["standings"], away_team_id)
@@ -315,74 +535,107 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
             st.metric("Points", row.get("points", "Non disponible"))
             st.metric("Différence buts", row.get("goalsDiff", "Non disponible"))
 
-    st.markdown("### 🧩 Evénements & lineups")
-    events = _response(data["events"])
+    # ── Événements & lineups ──────────────────────────────────────────────────
     lineups = _response(data["lineups"])
-    st.write(f"Evénements disponibles : {len(events)}")
-    st.write(f"Compositions disponibles : {len(lineups)}")
+    st.markdown("### 🧩 Événements & compositions")
+    st.write(f"Événements disponibles : {len(events)}  ·  Compositions : {len(lineups)}")
 
-    st.markdown("### 🤖 Analyse IA intelligente")
-
-    # Afficher le contexte live si disponible
-    live_ctx = ai_result.get("live_context")
-    if live_ctx and live_ctx.get("is_live"):
+    # ── Contexte live ─────────────────────────────────────────────────────────
+    if is_live and live_context and live_context.get("is_live"):
+        st.markdown("### 🤖 Contexte live")
         live_cols = st.columns(4)
-        live_cols[0].metric("Minute", f"{live_ctx.get('minute', 0)}'")
-        live_cols[1].metric("Phase", live_ctx.get("phase", "Inconnu"))
-        live_cols[2].metric("État", live_ctx.get("state", "Inconnu"))
-        live_cols[3].metric("Momentum", f"{live_ctx.get('momentum', 0):+.0%}")
+        live_cols[0].metric("Minute", f"{live_context.get('minute', 0)}'")
+        live_cols[1].metric("Phase",  live_context.get("phase", "—"))
+        live_cols[2].metric("État",   live_context.get("state", "—"))
+        pres = fp.get("pressure", {})
+        if not pres.get("unknown"):
+            live_cols[3].metric("Pression dom.", f"{pres.get('home_index', 0):.0f}")
+        mom = fp.get("momentum", {})
+        if mom.get("data_available"):
+            st.caption(f"Momentum: {mom.get('label','—')} · {home_name}: {mom.get('home_pct',50)}% / {away_name}: {mom.get('away_pct',50)}%")
+        else:
+            st.caption(f"⚠️ {mom.get('label', 'Données live insuffisantes')}")
 
-        # Afficher les statistiques de pression
-        pressure_cols = st.columns(2)
-        pressure_cols[0].metric(f"Pression {home_name}", f"{live_ctx.get('home_pressure', 0):.0f}")
-        pressure_cols[1].metric(f"Pression {away_name}", f"{live_ctx.get('away_pressure', 0):.0f}")
-
+    # ── ELO (informatif) ──────────────────────────────────────────────────────
     elo_cols = st.columns(2)
-    elo_cols[0].metric(f"Elo {home_name}", home_elo)
-    elo_cols[1].metric(f"Elo {away_name}", away_elo)
+    elo_cols[0].metric(f"Elo {home_name}", fp.get("home_elo", "—"))
+    elo_cols[1].metric(f"Elo {away_name}", fp.get("away_elo", "—"))
 
-    st.markdown("### 📈 Probabilités IA")
-    probabilities = ai_result["probabilities"]
+    # ══════════════════════════════════════════════════════════════════════════
+    # PROBABILITÉS — AFFICHÉES UNE SEULE FOIS (source: final_probabilities)
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("### 📈 Probabilités (source unique)")
     prob_cols = st.columns(3)
-    prob_cols[0].metric(f"Victoire {home_name}", f"{probabilities['home_win']}%")
-    prob_cols[0].progress(probabilities["home_win"] / 100)
-    prob_cols[1].metric("Match nul", f"{probabilities['draw']}%")
-    prob_cols[1].progress(probabilities["draw"] / 100)
-    prob_cols[2].metric(f"Victoire {away_name}", f"{probabilities['away_win']}%")
-    prob_cols[2].progress(probabilities["away_win"] / 100)
+    prob_cols[0].metric(f"Victoire {home_name}", f"{final_probs['home_win']}%")
+    prob_cols[0].progress(final_probs["home_win"] / 100)
+    prob_cols[1].metric("Match nul", f"{final_probs['draw']}%")
+    prob_cols[1].progress(final_probs["draw"] / 100)
+    prob_cols[2].metric(f"Victoire {away_name}", f"{final_probs['away_win']}%")
+    prob_cols[2].progress(final_probs["away_win"] / 100)
 
-    st.markdown("### 🎯 Score probable")
-    score_cols = st.columns(3)
-    for col, score_data in zip(score_cols, ai_result["top_scores"]):
-        col.metric(score_data["score"], f"{score_data['probability']}%")
+    # ── Scores probables (filtrés) ────────────────────────────────────────────
+    st.markdown("### 🎯 Scores probables (filtrés par score actuel)")
+    if final_scores:
+        score_cols = st.columns(min(5, len(final_scores)))
+        for col, sc in zip(score_cols, final_scores):
+            is_cur = sc.get("is_current", False)
+            col.metric(
+                f"{sc['score']} {'🔴' if is_cur else ''}",
+                f"{sc['probability']}%"
+            )
 
-    st.markdown("### 🧠 Niveau confiance IA")
-    st.metric(ai_result["confidence_label"], f"{ai_result['confidence']}%")
-    st.progress(min(ai_result["confidence"] / 100, 1.0))
+    # ══════════════════════════════════════════════════════════════════════════
+    # CONFIANCE — AFFICHÉE UNE SEULE FOIS (source: final_confidence)
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("### 🧠 Confiance du modèle (source unique)")
+    conf_icon = final_conf.get("icon", "🟡")
+    conf_label = final_conf.get("label", "Moyen")
+    conf_score = final_conf.get("score", 50)
+    conf_color = final_conf.get("color", "#ffaa00")
+    st.markdown(
+        f"<div style='display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;"
+        f"border:2px solid {conf_color}44;background:{conf_color}11;'>"
+        f"<span style='font-size:2rem'>{conf_icon}</span>"
+        f"<div><div style='font-size:1.2rem;font-weight:800;color:{conf_color};'>{conf_label}</div>"
+        f"<div style='font-size:0.85rem;color:#aaa;'>Score: {conf_score}%</div></div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
     st.caption(
-        f"xG local estimé : {ai_result['home_xg']} · xG extérieur estimé : {ai_result['away_xg']}. "
-        "Calcul déterministe basé sur les statistiques API, la forme récente, l'attaque, la défense et l'Elo local."
+        f"xG restants: {fp.get('home_xg', 0)} ({home_name}) · {fp.get('away_xg', 0)} ({away_name}). "
+        "Calcul centralisé depuis forme, ELO, H2H, classement et contexte live."
     )
 
-    # ========== 🔥 PARIS SUGGÉRÉS ==========
-    st.markdown("---")
-    st.markdown("### 🔥 Paris suggérés intelligents")
+    # ── Avertissements de cohérence ───────────────────────────────────────────
+    if consistency_warns:
+        with st.expander("⚠️ Corrections de cohérence appliquées", expanded=False):
+            for w in consistency_warns:
+                st.caption(f"• {w}")
 
-    # Analyser les opportunités de paris
+    # ── Paris suggérés (utilisent final_probs) ────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🔥 Paris suggérés")
+
+    ai_result_compat = {
+        "home_xg": fp.get("home_xg", 1.2),
+        "away_xg": fp.get("away_xg", 1.0),
+        "probabilities": final_probs,
+        "top_scores": [{"score": s["score"], "probability": s["probability"]} for s in final_scores],
+        "confidence": conf_score,
+        "confidence_label": conf_label,
+    }
     bet_analysis = analyze_bet_opportunities(
         live_context=live_context,
-        ai_result=ai_result,
+        ai_result=ai_result_compat,
         home_form=home_form,
         away_form=away_form,
         home_stats=home_stats,
         away_stats=away_stats,
         events=events,
     )
-
-    # Afficher les suggestions
     suggestions = bet_analysis.get("suggestions", [])
     if suggestions:
-        for i, suggestion in enumerate(suggestions[:4], 1):  # Max 4 suggestions
+        for i, suggestion in enumerate(suggestions[:4], 1):
             with st.container():
                 col1, col2, col3 = st.columns([3, 2, 3])
                 col1.markdown(f"**{i}. {suggestion['bet']}**")
@@ -394,51 +647,31 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
     else:
         st.info("Pas de suggestion de pari assez fiable pour ce match.")
 
-    # Niveau de confiance global
-    overall_confidence = bet_analysis.get("confidence_level", "Faible")
-    confidence_colors = {
-        "Faible": "🔴",
-        "Moyen": "🟡",
-        "Fort": "🟢",
-        "Très fort": "✅",
-    }
-    st.markdown(
-        f"### {confidence_colors.get(overall_confidence, '⚪')} Niveau de confiance global: **{overall_confidence}**"
-    )
-
-    # ========== 🧠 CONCLUSION IA FINALE ==========
+    # ══════════════════════════════════════════════════════════════════════════
+    # CONCLUSION — AFFICHÉE UNE SEULE FOIS (source: final_conclusion)
+    # ══════════════════════════════════════════════════════════════════════════
     st.markdown("---")
-    st.markdown("### 🧠 Conclusion IA finale")
-
-    conclusion = bet_analysis.get("conclusion", "Analyse en cours...")
+    st.markdown("### 🧠 Conclusion IA")
+    favorite_name, favorite_pct = get_favorite(final_probs, home_name, away_name)
     st.markdown(
-        f"<div style='background: linear-gradient(135deg, rgba(0,255,136,0.1), rgba(45,151,245,0.1)); "
-        f"padding: 20px; border-radius: 12px; border-left: 4px solid #00ff88;'>"
-        f"{conclusion.replace(chr(10), '<br>')}"
+        f"<div style='background:linear-gradient(135deg,rgba(0,255,136,0.08),rgba(45,151,245,0.08));"
+        f"padding:20px;border-radius:12px;border-left:4px solid {conf_color};'>"
+        f"{final_conc.replace(chr(10), '<br>')}"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-    # Note sur les statistiques estimées
     if any("*" in str(v) for v in home_stats.values()) or any("*" in str(v) for v in away_stats.values()):
-        st.caption("* Les statistiques marquées d'une astérisque ont été estimées intelligemment par l'IA.")
+        st.caption("* Statistiques estimées intelligemment par l'IA.")
 
-    # ========== 🎯 PRÉDICTIONS AVANCÉES ==========
+    # ══════════════════════════════════════════════════════════════════════════
+    # PRÉDICTIONS AVANCÉES — utilisent le final_prediction du fusion engine
+    # ══════════════════════════════════════════════════════════════════════════
     st.markdown("---")
-    
-    is_live = bool(live_context and live_context.get("minute"))
-    
-    full_predictions = generate_full_predictions(
-        home_team=home_name,
-        away_team=away_name,
-        expected_home_goals=float(ai_result.get("home_xg", 1.2)),
-        expected_away_goals=float(ai_result.get("away_xg", 1.0)),
-        home_win_prob=float(ai_result.get("home_win", 0.4)) / 100.0,
-        draw_prob=float(ai_result.get("draw", 0.3)) / 100.0,
-        away_win_prob=float(ai_result.get("away_win", 0.3)) / 100.0,
-        is_live=is_live,
-        live_context=live_context if is_live else None,
+    render_predictions_section(
+        _fusion_to_render_format(fp, home_name, away_name),
+        home_name,
+        away_name,
     )
-    render_predictions_section(full_predictions, home_name, away_name)
 
     st.markdown("</div>", unsafe_allow_html=True)

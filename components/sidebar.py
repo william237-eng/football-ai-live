@@ -37,8 +37,12 @@ def render_sidebar():
         active_page = st.session_state.get("active_page", "live")
         
         # Navigation buttons with dynamic styling based on active state
-        live_type = "primary" if active_page == "live" else "secondary"
-        future_type = "primary" if active_page == "future" else "secondary"
+        live_type     = "primary" if active_page == "live"     else "secondary"
+        future_type   = "primary" if active_page == "future"  else "secondary"
+        paris_type    = "primary" if active_page == "paris"   else "secondary"
+        over25_type   = "primary" if active_page == "over25"  else "secondary"
+        daily_type    = "primary" if active_page == "daily"   else "secondary"
+        history_type  = "primary" if active_page == "history" else "secondary"
 
         if active_page == "analysis":
             st.markdown(
@@ -62,6 +66,58 @@ def render_sidebar():
             on_click=_set_page,
             args=("future",),
             type=future_type,
+            use_container_width=True,
+        )
+
+        # Séparateur + bouton PARIS
+        st.markdown(
+            "<div style='border-top:1px solid rgba(255,255,255,0.08);margin:8px 0;'></div>",
+            unsafe_allow_html=True,
+        )
+
+        # Badge points dynamique
+        try:
+            from modules.betting.points_manager import get_points_info
+            from modules.betting.ticket_storage import init_db
+            init_db()
+            pts_info = get_points_info()
+            pts_label = f"🎰 PARIS  ·  {pts_info['points']} ⭐"
+        except Exception:
+            pts_label = "🎰 PARIS"
+
+        st.button(
+            pts_label,
+            key="paris_button",
+            on_click=_set_page,
+            args=("paris",),
+            type=paris_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "⚽ TOP +2.5 BUTS",
+            key="over25_button",
+            on_click=_set_page,
+            args=("over25",),
+            type=over25_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "🔮 PRÉDICTIONS DU JOUR",
+            key="daily_button",
+            on_click=_set_page,
+            args=("daily",),
+            type=daily_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "📅 HISTORIQUE",
+            key="history_button",
+            on_click=_set_page,
+            args=("history",),
+            type=history_type,
             use_container_width=True,
         )
 
