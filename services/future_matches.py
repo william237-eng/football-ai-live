@@ -90,6 +90,7 @@ class FutureMatchesService:
                         "start_date": start_date,
                         "start_time": start_time,
                         "start_date_display": start_date_display,
+                        "kick_off": fixture.get("date", ""),
                         "league": league_name or "—",
                         "league_country": league_country or "",
                         "league_flag": league_flag or "",

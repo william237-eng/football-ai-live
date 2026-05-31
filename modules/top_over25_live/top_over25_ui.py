@@ -275,7 +275,7 @@ def _render_match_card(m: Dict[str, Any], section: str = "active") -> None:
             f"<div style='background:rgba(239,68,68,0.07);border-radius:8px;"
             f"padding:6px;text-align:center;'>"
             f"<div style='font-size:0.60rem;color:#aaa;margin-bottom:1px;'>"
-            f"\ud83d\udd25 Intensit\u00e9</div>"
+            f"🔥 Intensité</div>"
             f"<div style='font-size:0.80rem;font-weight:800;color:{urg_col};'>"
             f"{urgency:.0f}/100</div></div>"
             f"<div style='background:rgba(167,139,250,0.07);border-radius:8px;"
@@ -287,13 +287,13 @@ def _render_match_card(m: Dict[str, Any], section: str = "active") -> None:
             f"<div style='background:rgba(245,158,11,0.07);border-radius:8px;"
             f"padding:6px;text-align:center;'>"
             f"<div style='font-size:0.60rem;color:#aaa;margin-bottom:1px;'>"
-            f"\ud83c\udfaf Restant</div>"
+            f"🎯 Restant</div>"
             f"<div style='font-size:0.80rem;font-weight:800;color:#f59e0b;'>"
             f"{remaining}\u2019</div></div>"
             f"</div>"
             f"<div style='margin-top:4px;font-size:0.63rem;color:#666;"
             f"text-align:center;'>"
-            f"\ud83d\udcc8 xG : {exp_goals:.2f} \u00b7 "
+            f"📈 xG : {exp_goals:.2f} · "
             f"{int(m.get('shots_total',0))} tirs \u00b7 "
             f"{int(m.get('corners',0))} corners"
             f"</div>"
@@ -596,7 +596,7 @@ def render_top_over25_page(api) -> None:
     # ── Cache session ─────────────────────────────────────────────────────
     now_ts       = _time.time()
     CACHE_TTL    = 30
-    FULL_TTL     = 300
+    FULL_TTL     = 600
     cache_key    = "over25_data"
     cache_ts_key = "over25_last_ts"
     full_ts_key  = "over25_last_full_ts"

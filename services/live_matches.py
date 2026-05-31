@@ -81,6 +81,8 @@ class LiveMatchesService:
                         "venue": venue,
                         "elapsed": elapsed,
                         "status": status,
+                        "status_short": status,
+                        "kick_off": fixture.get("date", ""),
                     }
                 )
             except Exception:

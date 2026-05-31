@@ -38,9 +38,9 @@ _FUT_TIERS = [
 FUT_MIN_DISPLAY     = 2      # minimum souhaitable de matchs futurs
 MAX_FUTURE          = 5      # jamais plus de 5 matchs futurs
 
-MAX_RESOLVED        = 15     # historique terminés
-MAX_ENRICH_LIVE     = 30     # candidats à enrichir live
-MAX_ENRICH_FUTURE   = 50     # pool large pour les passes adaptatives
+MAX_RESOLVED        = 8      # historique terminés
+MAX_ENRICH_LIVE     = 10     # candidats à enrichir live
+MAX_ENRICH_FUTURE   = 15     # pool large pour les passes adaptatives
 
 # Scores probables absurdes → toujours rejeter
 _REJECT_FUTURE_SCORES = {(0, 0)}

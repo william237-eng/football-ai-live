@@ -10,6 +10,7 @@ from typing import Dict, Any, Tuple
 
 from modules.betting.ticket_storage import (
     get_user,
+    get_user_tickets,
     update_points,
     update_last_refill,
     DEFAULT_USER_ID,
@@ -17,8 +18,8 @@ from modules.betting.ticket_storage import (
 )
 
 TICKET_COST   = 5
-REFILL_AMOUNT = 5
-REFILL_HOURS  = 12
+REFILL_AMOUNT = 10
+REFILL_HOURS  = 5
 
 
 def _parse_dt(iso: str) -> datetime:
@@ -36,21 +37,29 @@ def get_points_info(user_id: int = DEFAULT_USER_ID) -> Dict[str, Any]:
     last_refill = _parse_dt(user.get("last_refill") or "")
     now = datetime.now(timezone.utc)
 
-    # Refill automatique si 0 points et 12h écoulées
     elapsed = now - last_refill.astimezone(timezone.utc)
     refill_in_seconds = max(0, REFILL_HOURS * 3600 - elapsed.total_seconds())
 
-    if points == 0 and elapsed.total_seconds() >= REFILL_HOURS * 3600:
+    # Recharge seulement si : points == 0 ET aucun ticket ACTIVE en cours
+    has_active_ticket = bool(get_user_tickets(user_id, status="ACTIVE"))
+    eligible_refill   = (points == 0 and not has_active_ticket)
+    needs_refill      = (points == 0)
+
+    if eligible_refill and elapsed.total_seconds() >= REFILL_HOURS * 3600:
         points += REFILL_AMOUNT
         update_points(user_id, points)
         update_last_refill(user_id)
         refill_in_seconds = REFILL_HOURS * 3600
+        needs_refill = False
 
     return {
-        "points": points,
-        "can_bet": points >= TICKET_COST,
+        "points":           points,
+        "can_bet":          points >= TICKET_COST,
+        "needs_refill":     needs_refill,
+        "eligible_refill":  eligible_refill,
+        "has_active_ticket": has_active_ticket,
         "refill_in_seconds": int(refill_in_seconds),
-        "refill_in_label": _format_refill(refill_in_seconds) if points == 0 else None,
+        "refill_in_label":  _format_refill(refill_in_seconds) if needs_refill else None,
     }
 
 

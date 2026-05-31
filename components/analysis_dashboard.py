@@ -360,6 +360,8 @@ def render_verdict_ia(
         home_name, away_name, hw, d, aw,
         btts_yes, over25_p,
         is_live, hg, ag, min_,
+        home_xg=float(fp.get("home_xg", 0.0)),
+        away_xg=float(fp.get("away_xg", 0.0)),
     )
 
     conf_color = final_conf.get("color", "#f59e0b")
@@ -367,7 +369,13 @@ def render_verdict_ia(
     conf_score = final_conf.get("score", 50)
     conf_icon  = final_conf.get("icon", "🟡")
 
-    if market_prob >= 0.80:
+    # Cas : verdict déjà réalisé ou impossible en live
+    verdict_done = (market_label == "—")
+
+    if verdict_done:
+        signal_txt   = "🔒 Verdict en cours de réalisation"
+        signal_color = "#6b7280"
+    elif market_prob >= 0.80:
         signal_txt   = "💎 Signal très fort"
         signal_color = "#22c55e"
     elif market_prob >= 0.70:

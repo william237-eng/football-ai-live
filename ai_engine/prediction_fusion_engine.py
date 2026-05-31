@@ -402,6 +402,11 @@ def build_final_prediction(
         away_red_cards=int(ctx.get("away_red_cards", 0) or 0),
         home_red_impact=float(home_red_impact),
         away_red_impact=float(away_red_impact),
+        home_form=home_form,
+        away_form=away_form,
+        h2h_data=h2h_data,
+        home_elo=home_elo,
+        away_elo=away_elo,
     )
 
     # ── Package final ────────────────────────────────────────────────────────

@@ -5,12 +5,13 @@ Orchestrateur principal : crée un ticket, valide les items, attribue les récom
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from modules.betting.ticket_storage import (
     create_ticket, add_bet_item, get_ticket, get_ticket_items,
     update_ticket_status, update_item_result, has_duplicate_ticket,
-    init_db, DEFAULT_USER_ID,
+    sell_ticket, init_db, DEFAULT_USER_ID,
 )
 from modules.betting.points_manager import deduct_points, credit_points, get_points_info
 from modules.betting.betting_engine import build_ticket_selections
@@ -25,12 +26,14 @@ from modules.betting.reward_engine import compute_reward
 def submit_ticket(
     selections: List[Dict[str, Any]],
     user_id: int = DEFAULT_USER_ID,
+    points_used: int = 5,
 ) -> Dict[str, Any]:
     """
     Valide les sélections, déduit les points et crée le ticket en DB.
     Retourne {success, ticket_id, message}.
     """
     init_db()
+    points_used = max(5, int(points_used))
 
     # 1. Valider les sélections
     ok, msg, cleaned = build_ticket_selections(selections)
@@ -38,7 +41,7 @@ def submit_ticket(
         return {"success": False, "ticket_id": None, "message": msg}
 
     # 2. Vérifier points suffisants
-    ok2, msg2 = deduct_points(user_id, amount=5)
+    ok2, msg2 = deduct_points(user_id, amount=points_used)
     if not ok2:
         return {"success": False, "ticket_id": None, "message": msg2}
 
@@ -46,14 +49,13 @@ def submit_ticket(
     fids = [s["fixture_id"] for s in cleaned]
     preds = [s["prediction"] for s in cleaned]
     if has_duplicate_ticket(user_id, fids, preds):
-        # Rembourser les points
-        credit_points(user_id, 5)
+        credit_points(user_id, points_used)
         return {"success": False, "ticket_id": None, "message": "Ticket identique déjà actif."}
 
     # 4. Créer ticket
-    ticket_id = create_ticket(user_id, fids, points_used=5)
+    ticket_id = create_ticket(user_id, fids, points_used=points_used)
 
-    # 5. Insérer les items
+    # 5. Insérer les items (avec kick_off, odds, live_minute si fournis)
     for sel in cleaned:
         add_bet_item(
             ticket_id=ticket_id,
@@ -62,12 +64,121 @@ def submit_ticket(
             away_team=sel["away_team"],
             market=sel["market"],
             prediction=sel["prediction"],
+            kick_off=sel.get("kick_off", ""),
+            odds=float(sel.get("odds", 1.0)),
+            live_minute=int(sel.get("live_minute", 0)),
         )
 
     return {
         "success": True,
         "ticket_id": ticket_id,
         "message": f"Ticket #{ticket_id} créé ! 5 ⭐ débités.",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Vente d'un ticket
+# ─────────────────────────────────────────────────────────────────────────────
+
+SELL_PRICE = 4   # points remboursés si vente avant tout match commencé
+
+
+def compute_ticket_sell_offer(ticket_id: int) -> Dict[str, Any]:
+    """
+    Calcule si un ticket peut être vendu et à quel prix.
+    Règles :
+      - Vente pleine (4 pts) : aucun match n'a encore commencé (tous kick_off > now).
+      - Vente à moitié du gain potentiel : N-1 événements déjà WON, 1 seul reste PENDING.
+      - Impossible si un match a déjà commencé et la vente pleine est demandée.
+      - Impossible si statut != ACTIVE.
+    Retourne dict {can_sell_full, can_sell_half, sell_price_full, sell_price_half,
+                   reason_no_full, reason_no_half, nb_won, nb_total}.
+    """
+    ticket = get_ticket(ticket_id)
+    if not ticket or ticket["ticket_status"] != "ACTIVE":
+        return {"can_sell_full": False, "can_sell_half": False,
+                "sell_price_full": 0, "sell_price_half": 0,
+                "reason_no_full": "Ticket non actif.", "reason_no_half": "Ticket non actif.",
+                "nb_won": 0, "nb_total": 0}
+
+    items   = get_ticket_items(ticket_id)
+    nb_total = len(items)
+    nb_won   = sum(1 for i in items if i["result"] == "WON")
+    nb_lost  = sum(1 for i in items if i["result"] == "LOST")
+    nb_pending = sum(1 for i in items if i["result"] == "PENDING")
+
+    now_utc = datetime.now(timezone.utc)
+
+    # Vérifier si au moins un match a commencé (live_minute > 0 OU kick_off passé)
+    any_started = False
+    for item in items:
+        if (item.get("live_minute") or 0) > 0:
+            any_started = True
+            break
+        ko = item.get("kick_off", "")
+        if ko:
+            try:
+                ko_dt = datetime.fromisoformat(ko.replace("Z", "+00:00"))
+                if ko_dt.astimezone(timezone.utc) <= now_utc:
+                    any_started = True
+                    break
+            except Exception:
+                pass
+
+    # Vente pleine : 4 pts, seulement si aucun match n'a commencé
+    can_sell_full   = not any_started and nb_lost == 0
+    reason_no_full  = ("Impossible : un ou plusieurs matchs ont déjà commencé." if any_started
+                       else ("Coupon perdu." if nb_lost > 0 else ""))
+    sell_price_full = SELL_PRICE if can_sell_full else 0
+
+    # Vente à moitié du gain potentiel : N-1 WON, 1 PENDING, aucun LOST
+    from modules.betting.reward_engine import compute_reward
+    reward_info     = compute_reward(ticket["points_used"], nb_total)
+    half_price      = max(1, reward_info["reward_points"] // 2)
+    can_sell_half   = (nb_won == nb_total - 1 and nb_pending == 1 and nb_lost == 0
+                       and any_started)
+    reason_no_half  = ("" if can_sell_half
+                       else "Disponible quand tous les événements sauf 1 sont validés.")
+    sell_price_half = half_price if can_sell_half else 0
+
+    return {
+        "can_sell_full":   can_sell_full,
+        "can_sell_half":   can_sell_half,
+        "sell_price_full": sell_price_full,
+        "sell_price_half": sell_price_half,
+        "reason_no_full":  reason_no_full,
+        "reason_no_half":  reason_no_half,
+        "nb_won":          nb_won,
+        "nb_total":        nb_total,
+        "potential_reward": reward_info["reward_points"],
+    }
+
+
+def sell_ticket_action(
+    ticket_id: int,
+    mode: str = "full",
+    user_id: int = DEFAULT_USER_ID,
+) -> Dict[str, Any]:
+    """
+    Vend un ticket (mode='full' → 4 pts, mode='half' → moitié du gain potentiel).
+    Retourne {success, message, points_credited}.
+    """
+    offer = compute_ticket_sell_offer(ticket_id)
+    if mode == "full":
+        if not offer["can_sell_full"]:
+            return {"success": False, "message": offer["reason_no_full"], "points_credited": 0}
+        price = offer["sell_price_full"]
+    else:
+        if not offer["can_sell_half"]:
+            return {"success": False, "message": offer["reason_no_half"], "points_credited": 0}
+        price = offer["sell_price_half"]
+
+    sell_ticket(ticket_id, price)
+    credit_points(user_id, price)
+    return {
+        "success": True,
+        "message": f"Ticket #{ticket_id} vendu pour {price} ⭐.",
+        "points_credited": price,
     }
 
 

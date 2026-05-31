@@ -45,22 +45,41 @@ def init_db() -> None:
             ticket_status  TEXT DEFAULT 'ACTIVE',
             points_used    INTEGER DEFAULT 5,
             reward_points  INTEGER DEFAULT 0,
+            sold_price     INTEGER DEFAULT 0,
             created_at     TEXT,
             updated_at     TEXT
         );
 
         CREATE TABLE IF NOT EXISTS bet_items (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticket_id   INTEGER,
-            fixture_id  INTEGER,
-            home_team   TEXT,
-            away_team   TEXT,
-            market      TEXT,
-            prediction  TEXT,
-            result      TEXT DEFAULT 'PENDING',
-            created_at  TEXT
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id    INTEGER,
+            fixture_id   INTEGER,
+            home_team    TEXT,
+            away_team    TEXT,
+            market       TEXT,
+            prediction   TEXT,
+            result       TEXT DEFAULT 'PENDING',
+            kick_off     TEXT,
+            odds         REAL DEFAULT 1.0,
+            live_minute  INTEGER DEFAULT 0,
+            created_at   TEXT
         );
         """)
+        # Migration : ajouter colonnes manquantes si DB existante
+        for col, definition in [
+            ("sold_price",  "INTEGER DEFAULT 0"),
+            ("kick_off",    "TEXT"),
+            ("odds",        "REAL DEFAULT 1.0"),
+            ("live_minute", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE bet_items ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+        try:
+            conn.execute("ALTER TABLE bet_tickets ADD COLUMN sold_price INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -177,15 +196,38 @@ def add_bet_item(
     away_team: str,
     market: str,
     prediction: str,
+    kick_off: str = "",
+    odds: float = 1.0,
+    live_minute: int = 0,
 ) -> int:
     with _get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO bet_items
-               (ticket_id, fixture_id, home_team, away_team, market, prediction, result, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (ticket_id, fixture_id, home_team, away_team, market, prediction, "PENDING", _now()),
+               (ticket_id, fixture_id, home_team, away_team, market, prediction,
+                result, kick_off, odds, live_minute, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (ticket_id, fixture_id, home_team, away_team, market, prediction,
+             "PENDING", kick_off, odds, live_minute, _now()),
         )
         return cur.lastrowid
+
+
+def update_item_live_minute(item_id: int, minute: int) -> None:
+    """Met à jour le temps de jeu live d'un item."""
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE bet_items SET live_minute = ? WHERE id = ?",
+            (minute, item_id),
+        )
+
+
+def sell_ticket(ticket_id: int, sell_price: int) -> None:
+    """Marque un ticket comme vendu et enregistre le prix de vente."""
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE bet_tickets SET ticket_status = 'SOLD', sold_price = ?, updated_at = ? WHERE ticket_id = ?",
+            (sell_price, _now(), ticket_id),
+        )
 
 
 def get_ticket_items(ticket_id: int) -> List[Dict[str, Any]]:
