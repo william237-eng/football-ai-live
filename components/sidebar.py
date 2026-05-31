@@ -40,9 +40,10 @@ def render_sidebar():
         live_type     = "primary" if active_page == "live"     else "secondary"
         future_type   = "primary" if active_page == "future"  else "secondary"
         paris_type    = "primary" if active_page == "paris"   else "secondary"
-        over25_type   = "primary" if active_page == "over25"  else "secondary"
-        daily_type    = "primary" if active_page == "daily"   else "secondary"
-        history_type  = "primary" if active_page == "history" else "secondary"
+        over25_type   = "primary" if active_page == "over25"   else "secondary"
+        under25_type  = "primary" if active_page == "under25"  else "secondary"
+        daily_type    = "primary" if active_page == "daily"    else "secondary"
+        history_type  = "primary" if active_page == "history"  else "secondary"
 
         if active_page == "analysis":
             st.markdown(
@@ -109,6 +110,15 @@ def render_sidebar():
             on_click=_set_page,
             args=("daily",),
             type=daily_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "🔒 TOP -2.5 BUTS",
+            key="under25_button",
+            on_click=_set_page,
+            args=("under25",),
+            type=under25_type,
             use_container_width=True,
         )
 

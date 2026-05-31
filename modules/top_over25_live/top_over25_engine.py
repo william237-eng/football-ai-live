@@ -195,6 +195,8 @@ def compute_over25_probability(
     # home_def = buts encaissés par home en moyenne
     # away_atk = buts marqués par away en moyenne
     # away_def = buts encaissés par away en moyenne
+    _has_real_data = bool(home_recent) or bool(away_recent)
+
     home_atk, home_def = _team_attack_defense(home_recent or [], home_id or 0)
     away_atk, away_def = _team_attack_defense(away_recent or [], away_id or 0)
 
@@ -255,6 +257,7 @@ def compute_over25_probability(
                 home_xg=home_xg, away_xg=away_xg,
                 locked=True, locked_reason=f"Déjà {total_goals} buts",
                 continent=get_continent(league_country),
+                has_real_data=_has_real_data,
             )
 
         # Lambda résiduel pour les buts restants
@@ -281,6 +284,7 @@ def compute_over25_probability(
         home_xg=home_xg, away_xg=away_xg,
         locked=False, locked_reason="",
         continent=get_continent(league_country),
+        has_real_data=_has_real_data,
     )
 
 
@@ -292,6 +296,7 @@ def _build_result(
     is_live, is_finished,
     prob, lambda_val, home_xg, away_xg,
     locked, locked_reason, continent,
+    has_real_data: bool = False,
 ) -> Dict[str, Any]:
 
     # Confiance
@@ -326,7 +331,7 @@ def _build_result(
         "is_finished":       is_finished,
         "over25_prob":       round(prob, 4),
         "over25_pct":        round(prob * 100, 1),
-        "initial_prob":      round(prob, 4),   # conservé pour affichage post-match
+        "initial_prob":      round(prob, 4),
         "initial_pct":       round(prob * 100, 1),
         "lambda_val":        round(lambda_val, 2),
         "home_xg":           round(home_xg, 2),
@@ -336,5 +341,6 @@ def _build_result(
         "conf_label":        conf_label,
         "conf_color":        conf_color,
         "continent":         continent,
-        "validation":        None,  # Sera rempli par le validator
+        "validation":        None,
+        "data_source":       "real" if has_real_data else "estimated",
     }

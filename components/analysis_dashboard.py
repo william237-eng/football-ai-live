@@ -19,6 +19,422 @@ def _response(data: Dict[str, Any]) -> Any:
     return data or []
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ENJEU DU MATCH
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _detect_match_type(league_name: str, round_str: str) -> str:
+    """Détecte le type de match : Championnat, Coupe, Ligue des Champions, Derby…"""
+    ln = (league_name or "").lower()
+    rn = (round_str or "").lower()
+    if any(k in ln for k in ("champions league", "ligue des champions", "ucl")):
+        return "⭐ Ligue des Champions UEFA"
+    if any(k in ln for k in ("europa league", "conference league")):
+        return "🌍 Coupe d'Europe"
+    if any(k in ln for k in ("world cup", "coupe du monde")):
+        return "🌍 Coupe du Monde"
+    if any(k in ln for k in ("cup", "coupe", "fa cup", "dfb", "copa del")):
+        return "🏆 Coupe nationale"
+    if any(k in rn for k in ("final", "semi-final", "quarter")):
+        return "🏆 Phase éliminatoire"
+    return "📋 Championnat"
+
+
+def _standing_label(row: Dict) -> str:
+    if not row:
+        return "—"
+    rank  = row.get("rank", "—")
+    pts   = row.get("points", "—")
+    gd    = row.get("goalsDiff", "—")
+    gd_str = f"+{gd}" if isinstance(gd, int) and gd > 0 else str(gd)
+    return f"#{rank} · {pts} pts · diff {gd_str}"
+
+
+def _analyse_stake(row: Dict, team_name: str) -> tuple:
+    """
+    Analyse l'enjeu d'une équipe selon son classement.
+    Retourne (icone, label_enjeu, couleur, description).
+    Logique : rang 1-4 = titre/Europe, 5-6 = Europa, zone relégation = danger.
+    """
+    if not row:
+        return ("❓", "Enjeu inconnu", "#888888",
+                "Données de classement non disponibles.",
+                "—", 0, "—", 0, 0, 0, 0, 0)
+
+    rank  = row.get("rank") or 99
+    pts   = row.get("points") or 0
+    played = (row.get("all") or {}).get("played") or 0
+    wins  = (row.get("all") or {}).get("win") or 0
+    draws = (row.get("all") or {}).get("draw") or 0
+    losses= (row.get("all") or {}).get("lose") or 0
+    gd    = row.get("goalsDiff") or 0
+
+    # Forme récente (chaîne ex: "WWDLW")
+    form_str = row.get("form") or ""
+    recent = list(form_str[-5:]) if form_str else []
+    recent_wins   = recent.count("W")
+    recent_losses = recent.count("L")
+    recent_draws  = recent.count("D")
+
+    form_label = ""
+    if len(recent) >= 3:
+        if recent_wins >= 4:
+            form_label = "🔥 En feu (série W)"
+        elif recent_losses >= 3:
+            form_label = "❄️ Série noire"
+        elif recent_wins >= 2 and recent_losses == 0:
+            form_label = "📈 Bonne dynamique"
+        elif recent_draws >= 3:
+            form_label = "🤝 Beaucoup de nuls"
+        else:
+            form_label = "↔️ Forme irrégulière"
+
+    # Description des 5 derniers matchs
+    form_detail = " ".join(
+        f"<span style='color:{'#22c55e' if r=='W' else '#ef4444' if r=='L' else '#f59e0b'}'>"
+        f"{'V' if r=='W' else 'D' if r=='L' else 'N'}</span>"
+        for r in recent
+    ) if recent else "—"
+
+    # Points par match
+    ppm = round(pts / max(played, 1), 2)
+
+    # Détermination de l'enjeu selon le rang
+    if rank == 1:
+        icon, label, color = "👑", "LEADER — Course au titre", "#f59e0b"
+        desc = f"1er au classement avec {pts} pts. Doit maintenir la pression pour décrocher le titre."
+    elif rank <= 3:
+        icon, label, color = "🏆", "Podium — Zone titre / C1", "#f59e0b"
+        desc = f"#{rank} au classement ({pts} pts). Objectif : rester dans le top 3 pour le titre ou la C1."
+    elif rank <= 6:
+        icon, label, color = "🌍", "Course à l'Europe", "#3b82f6"
+        desc = f"#{rank} au classement ({pts} pts). Lutte pour une place européenne (C3/Conference League)."
+    elif rank <= 10:
+        icon, label, color = "📊", "Milieu de tableau", "#888888"
+        desc = f"#{rank} au classement ({pts} pts, {ppm} pts/match). Enjeu de positionnement."
+    elif rank <= 15:
+        icon, label, color = "⚠️", "Vigilance — Milieu bas", "#f59e0b"
+        desc = f"#{rank} au classement ({pts} pts). Doit s'éloigner de la zone dangereuse."
+    elif rank <= 18:
+        icon, label, color = "🚨", "DANGER — Zone relégation", "#ef4444"
+        desc = f"#{rank} au classement ({pts} pts). En zone de relégation — match CRUCIAL pour s'en sortir."
+    else:
+        icon, label, color = "🔴", "URGENCE — Dernier recours", "#ef4444"
+        desc = f"#{rank} au classement ({pts} pts). Situation critique — victoire impérative."
+
+    if form_label:
+        desc += f" {form_label}."
+
+    return (icon, label, color, desc, form_detail, pts, rank, played, wins, draws, losses, gd)
+
+
+def render_match_stakes(
+    home_name: str,
+    away_name: str,
+    home_logo: str,
+    away_logo: str,
+    league_name: str,
+    league_country: str,
+    venue_name: str,
+    match_date: str,
+    round_str: str,
+    home_standing: Dict,
+    away_standing: Dict,
+    is_live: bool,
+    score: str,
+    minute: int,
+    status_short: str,
+) -> None:
+    """Affiche le bloc ENJEU DU MATCH en tête de page avec analyse des objectifs de chaque équipe."""
+
+    match_type = _detect_match_type(league_name, round_str)
+
+    # ── Badge état ─────────────────────────────────────────────────────────
+    if is_live:
+        state_badge = (
+            f"<span style='background:#e74c3c;color:#fff;border-radius:20px;"
+            f"padding:4px 14px;font-weight:800;font-size:0.85rem;'>🔴 LIVE {minute}'</span>"
+        )
+    elif status_short in ("FT", "AET", "PEN"):
+        state_badge = (
+            f"<span style='background:#444;color:#ccc;border-radius:20px;"
+            f"padding:4px 14px;font-weight:700;font-size:0.85rem;'>⚫ Terminé</span>"
+        )
+    else:
+        state_badge = (
+            f"<span style='background:#3b82f6;color:#fff;border-radius:20px;"
+            f"padding:4px 14px;font-weight:700;font-size:0.85rem;'>📅 {match_date}</span>"
+        )
+
+    # ── Logos ──────────────────────────────────────────────────────────────
+    def logo_html(url):
+        if url:
+            return (
+                f"<img src='{html_lib.escape(url)}' "
+                f"style='height:52px;width:52px;object-fit:contain;'>"
+            )
+        return "<span style='font-size:2rem;'>⚽</span>"
+
+    # ── Score ou VS ─────────────────────────────────────────────────────────
+    score_block = (
+        f"<div style='font-size:2.2rem;font-weight:900;letter-spacing:6px;color:#fff;'>{score}</div>"
+        if (is_live or status_short in ("FT", "AET", "PEN")) else
+        "<div style='font-size:1.2rem;color:#888;font-weight:700;'>VS</div>"
+    )
+
+    # ── Analyse enjeux chaque équipe ────────────────────────────────────────
+    h = _analyse_stake(home_standing, home_name)
+    a = _analyse_stake(away_standing, away_name)
+    h_icon, h_label, h_color, h_desc, h_form, h_pts, h_rank, h_played, h_wins, h_draws, h_losses, h_gd = h
+    a_icon, a_label, a_color, a_desc, a_form, a_pts, a_rank, a_played, a_wins, a_draws, a_losses, a_gd = a
+
+    gd_h = f"+{h_gd}" if isinstance(h_gd, int) and h_gd > 0 else str(h_gd)
+    gd_a = f"+{a_gd}" if isinstance(a_gd, int) and a_gd > 0 else str(a_gd)
+
+    # ── Intensité du duel (écart de rang) ───────────────────────────────────
+    if isinstance(h_rank, int) and isinstance(a_rank, int):
+        rank_gap = abs(h_rank - a_rank)
+        if rank_gap <= 2:
+            duel_label = "⚔️ Duel entre équipes proches — match tendu attendu"
+            duel_color = "#f59e0b"
+        elif rank_gap <= 5:
+            duel_label = "📊 Légère différence de niveau entre les deux équipes"
+            duel_color = "#888"
+        else:
+            top = home_name if h_rank < a_rank else away_name
+            duel_label = f"🔝 {top} nettement favoris au classement"
+            duel_color = "#3b82f6"
+    else:
+        duel_label = ""
+        duel_color = "#888"
+
+    duel_html = (
+        f"<div style='text-align:center;font-size:0.75rem;color:{duel_color};"
+        f"font-weight:700;margin:10px 0 6px;'>{duel_label}</div>"
+        if duel_label else ""
+    )
+
+    # ── HTML enjeu équipe ───────────────────────────────────────────────────
+    def team_stake_html(name, logo, icon, label, color, desc, form_detail,
+                        pts, rank, played, wins, draws, losses, gd_str, align):
+        flex_dir = "row" if align == "left" else "row-reverse"
+        text_align = "left" if align == "left" else "right"
+        return (
+            "<div style='background:" + color + "12;border:1px solid " + color + "33;"
+            "border-radius:12px;padding:14px 16px;height:100%;'>"
+
+            # Logo + nom + badge enjeu
+            "<div style='display:flex;align-items:center;gap:10px;"
+            "flex-direction:" + flex_dir + ";margin-bottom:10px;'>"
+            + logo_html(logo) +
+            "<div style='text-align:" + text_align + ";'>"
+            "<div style='font-size:1rem;font-weight:800;color:#fff;'>" + html_lib.escape(name) + "</div>"
+            "<div style='font-size:0.7rem;font-weight:700;color:" + color + ";"
+            "background:" + color + "22;border-radius:8px;padding:2px 8px;"
+            "display:inline-block;margin-top:3px;'>"
+            + icon + " " + label +
+            "</div>"
+            "</div>"
+            "</div>"
+
+            # Stats classement
+            "<div style='display:grid;grid-template-columns:repeat(4,1fr);"
+            "gap:4px;margin-bottom:10px;text-align:center;'>"
+            "<div style='background:rgba(255,255,255,0.05);border-radius:6px;padding:5px 2px;'>"
+            "<div style='font-size:1rem;font-weight:900;color:" + color + ";'>#" + str(rank) + "</div>"
+            "<div style='font-size:0.6rem;color:#888;'>Rang</div></div>"
+            "<div style='background:rgba(255,255,255,0.05);border-radius:6px;padding:5px 2px;'>"
+            "<div style='font-size:1rem;font-weight:900;color:#fff;'>" + str(pts) + "</div>"
+            "<div style='font-size:0.6rem;color:#888;'>Points</div></div>"
+            "<div style='background:rgba(255,255,255,0.05);border-radius:6px;padding:5px 2px;'>"
+            "<div style='font-size:0.82rem;font-weight:700;color:#fff;'>"
+            + str(wins) + "V " + str(draws) + "N " + str(losses) + "D</div>"
+            "<div style='font-size:0.6rem;color:#888;'>Bilan</div></div>"
+            "<div style='background:rgba(255,255,255,0.05);border-radius:6px;padding:5px 2px;'>"
+            "<div style='font-size:0.9rem;font-weight:700;color:#fff;'>" + gd_str + "</div>"
+            "<div style='font-size:0.6rem;color:#888;'>Diff. buts</div></div>"
+            "</div>"
+
+            # Forme récente
+            "<div style='font-size:0.68rem;color:#aaa;margin-bottom:4px;'>Forme (5 der.) : "
+            + form_detail +
+            "</div>"
+
+            # Description enjeu
+            "<div style='font-size:0.72rem;color:#ccc;line-height:1.5;"
+            "border-top:1px solid rgba(255,255,255,0.08);"
+            "padding-top:8px;margin-top:4px;'>" + html_lib.escape(desc) + "</div>"
+
+            "</div>"
+        )
+
+    h_html = team_stake_html(
+        home_name, home_logo, h_icon, h_label, h_color, h_desc,
+        h_form, h_pts, h_rank, h_played, h_wins, h_draws, h_losses, gd_h, "left"
+    )
+    a_html = team_stake_html(
+        away_name, away_logo, a_icon, a_label, a_color, a_desc,
+        a_form, a_pts, a_rank, a_played, a_wins, a_draws, a_losses, gd_a, "right"
+    )
+
+    # ── Rendu complet ───────────────────────────────────────────────────────
+    st.markdown(
+        # Bandeau compétition
+        f"<div style='background:linear-gradient(90deg,rgba(245,158,11,0.15),rgba(0,0,0,0.3),rgba(59,130,246,0.15));"
+        f"border:1px solid rgba(255,255,255,0.08);border-radius:16px;"
+        f"padding:16px 20px;margin-bottom:6px;'>"
+
+        f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+        f"<div>"
+        f"<span style='font-size:0.78rem;color:#f59e0b;font-weight:700;letter-spacing:1px;'>{match_type}</span>"
+        f"<span style='font-size:0.72rem;color:#888;margin-left:10px;'>{html_lib.escape(league_name)}"
+        f"{(' · ' + html_lib.escape(round_str)) if round_str else ''}"
+        f" · {html_lib.escape(league_country)}</span>"
+        f"</div>"
+        f"{state_badge}"
+        f"</div>"
+
+        # Score central
+        f"<div style='text-align:center;margin:10px 0 4px;'>"
+        f"{score_block}"
+        f"<div style='font-size:0.68rem;color:#666;margin-top:2px;'>"
+        f"🏟️ {html_lib.escape(venue_name or 'Stade non communiqué')}"
+        f"</div>"
+        f"</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Cartes enjeu côte à côte
+    col_h, col_a = st.columns(2)
+    with col_h:
+        st.markdown(h_html, unsafe_allow_html=True)
+    with col_a:
+        st.markdown(a_html, unsafe_allow_html=True)
+
+    # Ligne intensité du duel
+    if duel_label:
+        st.markdown(
+            f"<div style='text-align:center;font-size:0.78rem;color:{duel_color};"
+            f"font-weight:700;margin:8px 0 16px;'>{duel_label}</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown("<div style='margin-bottom:14px;'></div>", unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VERDICT IA FINAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_verdict_ia(
+    home_name: str,
+    away_name: str,
+    fp: Dict[str, Any],
+    is_live: bool,
+) -> None:
+    """
+    Affiche le verdict IA en haut de page :
+    favori + probabilités 1X2 + marché recommandé + niveau de confiance.
+    """
+    from ai_engine.conclusion_engine import _pick_market
+
+    final_probs = fp.get("final_probabilities", {})
+    final_conf  = fp.get("final_confidence", {})
+    btts        = fp.get("btts", {})
+    ou_markets  = fp.get("ou_markets", {})
+
+    hw  = final_probs.get("home_win", 33.3) / 100.0
+    d   = final_probs.get("draw", 33.3)     / 100.0
+    aw  = final_probs.get("away_win", 33.3) / 100.0
+
+    hg  = fp.get("home_goals", 0)
+    ag  = fp.get("away_goals", 0)
+    min_= fp.get("minute", 0)
+
+    btts_yes = btts.get("yes_prob", 0.5)
+    ou25      = ou_markets.get("over_25", {})
+    over25_p  = ou25.get("prob", 0.0) if isinstance(ou25, dict) else 0.0
+
+    market_label, market_conseil, market_prob = _pick_market(
+        home_name, away_name, hw, d, aw,
+        btts_yes, over25_p,
+        is_live, hg, ag, min_,
+    )
+
+    conf_color = final_conf.get("color", "#f59e0b")
+    conf_label = final_conf.get("label", "Moyen")
+    conf_score = final_conf.get("score", 50)
+    conf_icon  = final_conf.get("icon", "🟡")
+
+    if market_prob >= 0.80:
+        signal_txt   = "💎 Signal très fort"
+        signal_color = "#22c55e"
+    elif market_prob >= 0.70:
+        signal_txt   = "✅ Signal fort"
+        signal_color = "#84cc16"
+    elif market_prob >= 0.60:
+        signal_txt   = "🟡 Signal modéré"
+        signal_color = "#f59e0b"
+    else:
+        signal_txt   = "⚠️ Signal faible"
+        signal_color = "#ef4444"
+
+    # 1X2 pill
+    def pill(label, prob, is_fav):
+        bg = "#22c55e22" if is_fav else "rgba(255,255,255,0.04)"
+        border = "#22c55e" if is_fav else "rgba(255,255,255,0.1)"
+        fw = "900" if is_fav else "600"
+        return (
+            f"<div style='background:{bg};border:2px solid {border};"
+            f"border-radius:12px;padding:10px 6px;text-align:center;'>"
+            f"<div style='font-size:0.75rem;color:#aaa;margin-bottom:4px;'>{label}</div>"
+            f"<div style='font-size:1.4rem;font-weight:{fw};color:#fff;'>{round(prob*100)}%</div>"
+            f"</div>"
+        )
+
+    home_fav = hw >= d and hw >= aw
+    away_fav = aw >= d and aw >= hw
+
+    st.markdown(
+        f"<div style='background:linear-gradient(135deg,rgba(0,212,255,0.06),rgba(139,92,246,0.08));"
+        f"border:1px solid {conf_color}44;border-radius:16px;"
+        f"padding:20px 24px;margin-bottom:18px;'>"
+
+        # Titre
+        f"<div style='font-size:0.8rem;font-weight:700;color:{conf_color};"
+        f"letter-spacing:2px;margin-bottom:12px;'>🤖 VERDICT IA — ANALYSE COMPLÈTE</div>"
+
+        # 1X2 grid
+        f"<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;'>"
+        + pill(f"Victoire {home_name}", hw, home_fav)
+        + pill("Match Nul", d, not home_fav and not away_fav)
+        + pill(f"Victoire {away_name}", aw, away_fav)
+        + f"</div>"
+
+        # Marché recommandé
+        f"<div style='background:{signal_color}18;border:1px solid {signal_color}44;"
+        f"border-radius:12px;padding:14px 18px;margin-bottom:12px;'>"
+        f"<div style='font-size:0.72rem;color:#aaa;margin-bottom:4px;'>MARCHÉ RECOMMANDÉ</div>"
+        f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+        f"<span style='font-size:1.1rem;font-weight:800;color:#fff;'>{market_conseil}</span>"
+        f"<span style='font-size:1.5rem;font-weight:900;color:{signal_color};'>{round(market_prob*100)}%</span>"
+        f"</div>"
+        f"<div style='margin-top:6px;font-size:0.78rem;font-weight:700;color:{signal_color};'>{signal_txt}</div>"
+        f"</div>"
+
+        # Confiance globale
+        f"<div style='display:flex;align-items:center;gap:10px;'>"
+        f"<span style='font-size:1.3rem;'>{conf_icon}</span>"
+        f"<div style='font-size:0.82rem;color:#aaa;'>Confiance globale : "
+        f"<b style='color:{conf_color};'>{conf_label} ({conf_score}%)</b></div>"
+        f"</div>"
+
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _fusion_to_render_format(fp: Dict[str, Any], home_name: str = "", away_name: str = "") -> Dict[str, Any]:
     """
     Convertit le final_prediction du fusion engine vers le format
@@ -308,16 +724,32 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
     time_label = f"{status.get('elapsed')}’ {status.get('short') or ''}" if status.get("elapsed") else fixture_info.get("date", "")
 
     st.markdown("<div class='analysis-shell'>", unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class='analysis-hero'>
-          <div class='analysis-team'><img src='{html_lib.escape(str(home.get('logo') or ''))}'/><h2>{html_lib.escape(home_name)}</h2></div>
-          <div class='analysis-score'><div>{html_lib.escape(score)}</div><span>{html_lib.escape(str(time_label))}</span></div>
-          <div class='analysis-team'><img src='{html_lib.escape(str(away.get('logo') or ''))}'/><h2>{html_lib.escape(away_name)}</h2></div>
-        </div>
-        <div class='analysis-meta'>{html_lib.escape(str(league.get('name') or '—'))} · {html_lib.escape(str(venue.get('name') or 'Stade non disponible'))}</div>
-        """,
-        unsafe_allow_html=True,
+
+    # ── Classements (récupérés tôt pour render_match_stakes) ─────────────────
+    _home_standing_early = _standing_for_team(data["standings"], home_team_id)
+    _away_standing_early = _standing_for_team(data["standings"], away_team_id)
+    _round_str = league.get("round", "")
+    _match_date_str = (fixture_info.get("date") or "")[:10]
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ENJEU DU MATCH — Affiché EN PREMIER
+    # ══════════════════════════════════════════════════════════════════════════
+    render_match_stakes(
+        home_name=home_name,
+        away_name=away_name,
+        home_logo=home.get("logo") or "",
+        away_logo=away.get("logo") or "",
+        league_name=league.get("name") or "",
+        league_country=league.get("country") or "",
+        venue_name=venue.get("name") or "",
+        match_date=_match_date_str,
+        round_str=_round_str,
+        home_standing=_home_standing_early,
+        away_standing=_away_standing_early,
+        is_live=_match_is_live,
+        score=score,
+        minute=int(status.get("elapsed") or 0),
+        status_short=status.get("short") or "NS",
     )
 
     stats_items = _response(data["statistics"])
@@ -496,6 +928,11 @@ def render_analysis_dashboard(fixture_id: int, home_team_id: int, away_team_id: 
     final_conf   = fp["final_confidence"]
     final_conc   = fp["final_conclusion"]
     consistency_warns = fp.get("consistency_warnings", [])
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # VERDICT IA — Affiché juste après l'enjeu, avant toute analyse
+    # ══════════════════════════════════════════════════════════════════════════
+    render_verdict_ia(home_name, away_name, fp, is_live)
 
     # ── Forme récente ─────────────────────────────────────────────────────────
     st.markdown("### 🔥 Forme récente")

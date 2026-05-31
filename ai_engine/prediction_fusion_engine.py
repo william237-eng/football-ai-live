@@ -147,7 +147,15 @@ def build_final_prediction(
     pressure_unknown = pressure_result.get("unknown", True)
 
     if is_live and minute > 0:
-        red_shift = ctx.get("red_card_shift", 0.0) or 0.0
+        # ── Impact carton rouge temporel ────────────────────────────────────
+        # home_red_impact = poids cumul\u00e9 des cartons du domicile (0-30'=0.10, 75+'=0.38)
+        # Formule : r\u00e9duction xG = impact * 1.4, plafonn\u00e9 \u00e0 -65%
+        home_red_impact = ctx.get("home_red_impact", 0.0) or 0.0
+        away_red_impact = ctx.get("away_red_impact", 0.0) or 0.0
+        from ai_engine.live_context_engine import clamp as _clamp
+        home_red_penalty = _clamp(home_red_impact * 1.4, 0.0, 0.65)
+        away_red_penalty = _clamp(away_red_impact * 1.4, 0.0, 0.65)
+
         mom_h = 1.0 + max(-0.35, min(0.35, mom_val * 0.5))
         mom_a = 1.0 - max(-0.35, min(0.35, mom_val * 0.5))
 
@@ -161,11 +169,12 @@ def build_final_prediction(
         rem_h = max(0.01, base_h_xg * remaining_frac * mom_h * (0.8 + pr * 0.4))
         rem_a = max(0.01, base_a_xg * remaining_frac * mom_a * (1.2 - pr * 0.4))
 
-        if red_shift < 0:
-            rem_a = max(0.01, rem_a * 0.60)
-        elif red_shift > 0:
-            rem_h = max(0.01, rem_h * 0.60)
+        # Appliquer la p\u00e9nalit\u00e9 carton rouge multiplicative
+        rem_h = max(0.01, rem_h * (1.0 - home_red_penalty))
+        rem_a = max(0.01, rem_a * (1.0 - away_red_penalty))
     else:
+        home_red_impact = 0.0
+        away_red_impact = 0.0
         rem_h = base_h_xg
         rem_a = base_a_xg
 
@@ -214,6 +223,24 @@ def build_final_prediction(
             sides = hw + aw + 1e-9
             hw = (1.0 - d) * hw / sides
             aw = (1.0 - d) * aw / sides
+
+        # ── Boost 1X2 carton rouge — dynamique selon temps restant ──────────
+        # Si domicile a un carton rouge → l'extérieur est avantagé
+        # Si extérieur a un carton rouge → le domicile est avantagé
+        # Le boost croît avec l'impact temporel (plus fort en fin de match)
+        # home_red_penalty et away_red_penalty déjà calculés ci-dessus
+        if home_red_impact > 0.0:
+            # domicile réduit → boost extérieur, réduction nul
+            red_boost = min(0.15, home_red_impact * 0.35 * (1.0 + time_cert * 0.5))
+            aw = min(0.92, aw + red_boost)
+            d  = max(0.02, d  - red_boost * 0.5)
+            hw = max(0.01, 1.0 - aw - d)
+        if away_red_impact > 0.0:
+            # extérieur réduit → boost domicile, réduction nul
+            red_boost = min(0.15, away_red_impact * 0.35 * (1.0 + time_cert * 0.5))
+            hw = min(0.92, hw + red_boost)
+            d  = max(0.02, d  - red_boost * 0.5)
+            aw = max(0.01, 1.0 - hw - d)
 
     # ── Normaliser ──────────────────────────────────────────────────────────
     _t = hw + d + aw
@@ -371,6 +398,10 @@ def build_final_prediction(
         is_live=is_live,
         home_xg=rem_h, away_xg=rem_a,
         confidence=final_confidence,
+        home_red_cards=int(ctx.get("home_red_cards", 0) or 0),
+        away_red_cards=int(ctx.get("away_red_cards", 0) or 0),
+        home_red_impact=float(home_red_impact),
+        away_red_impact=float(away_red_impact),
     )
 
     # ── Package final ────────────────────────────────────────────────────────

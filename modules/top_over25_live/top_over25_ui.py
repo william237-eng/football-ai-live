@@ -193,16 +193,34 @@ def _render_match_card(m: Dict[str, Any]) -> None:
 
     pred_block = _render_pred_block(m)
 
+    # Badge source données
+    data_source = m.get("data_source", "estimated")
+    if data_source == "real":
+        src_badge = (
+            "<span style='font-size:0.65rem;background:rgba(34,197,94,0.15);"
+            "color:#22c55e;border-radius:10px;padding:2px 7px;"
+            "font-weight:700;'>📡 Données réelles</span>"
+        )
+    else:
+        src_badge = (
+            "<span style='font-size:0.65rem;background:rgba(245,158,11,0.15);"
+            "color:#f59e0b;border-radius:10px;padding:2px 7px;"
+            "font-weight:700;'>⚙️ Données estimées</span>"
+        )
+
     card_html = "".join([
         f"<div style='background:{card_bg};border:1px solid {border_color};"
         f"border-radius:14px;padding:16px;margin-bottom:14px;'>",
 
-        # Statut
+        # Statut + source badge
         f"<div style='display:flex;justify-content:space-between;align-items:center;"
         f"margin-bottom:8px;flex-wrap:wrap;gap:6px;'>"
         f"<span style='background:{s_bg};color:{s_color};border-radius:20px;"
         f"padding:3px 10px;font-size:0.75rem;font-weight:700;'>{s_label}</span>"
+        f"<div style='display:flex;align-items:center;gap:6px;'>"
+        + src_badge +
         f"<span style='font-size:0.72rem;color:#888;'>{m.get('start_time','—')}</span>"
+        f"</div>"
         f"</div>",
 
         # Ligue
@@ -300,9 +318,14 @@ def _render_performance_block() -> None:
     # Si aucune donnée dans aucune période
     if today["total"] + week["total"] + month["total"] == 0:
         st.markdown(
-            "<div style='text-align:center;padding:12px;color:#888;font-size:0.82rem;"
-            "border:2px dashed rgba(167,139,250,0.15);border-radius:10px;'>"
-            "Aucun historique disponible · Les performances s'accumuleront au fil des matchs terminés.</div>",
+            "<div style='text-align:center;padding:16px;color:#aaa;font-size:0.82rem;"
+            "border:2px dashed rgba(167,139,250,0.2);border-radius:10px;'>"
+            "<div style='font-size:1.1rem;margin-bottom:6px;'>📊</div>"
+            "<b style='color:#a78bfa;'>Aucune prédiction enregistrée</b><br>"
+            "<span style='font-size:0.78rem;color:#666;'>"
+            "Les statistiques réelles (validées / échouées) s'accumuleront automatiquement "
+            "dès que des matchs prédits seront terminés aujourd'hui."
+            "</span></div>",
             unsafe_allow_html=True,
         )
         return

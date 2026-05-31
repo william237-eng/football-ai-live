@@ -124,6 +124,81 @@ def _render_ticket(ticket: Dict[str, Any]) -> None:
 # Formulaire création ticket
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _market_is_expired(match: Dict, market: str, prediction: str) -> tuple[bool, str]:
+    """
+    Retourne (True, raison) si le marché sélectionné est devenu invalide
+    pour un match en cours (l'événement concerné a déjà eu lieu).
+    """
+    mtype   = match.get("_type", "")
+    minute  = match.get("minute", 0) or 0
+    status  = match.get("status_short", "NS")
+    home_g  = match.get("home_score", 0) or 0
+    away_g  = match.get("away_score", 0) or 0
+    total_g = home_g + away_g
+
+    is_live     = "LIVE" in mtype or status in ("1H", "2H", "HT", "ET", "BT", "P", "LIVE")
+    is_finished = status in ("FT", "AET", "PEN")
+    is_2nd_half = status in ("2H", "ET", "BT") or (status == "HT") or minute > 45
+
+    # Match déjà terminé → aucun marché valide
+    if is_finished:
+        return True, "Ce match est déjà terminé."
+
+    if not is_live:
+        return False, ""
+
+    # ── Marchés 1ère mi-temps uniquement ────────────────────────────────
+    if market == "Mi-temps":
+        first_half_only = [
+            "Domicile marque 1ère MT",
+            "Extérieur marque 1ère MT",
+            "BTTS 1ère MT",
+            "Over 0.5 1ère MT",
+        ]
+        if prediction in first_half_only and is_2nd_half:
+            return True, f"Le marché '{prediction}' concerne la 1ère mi-temps déjà terminée."
+
+    # ── Over/Under Buts : seuil déjà dépassé ────────────────────────────
+    if market == "Over/Under Buts":
+        try:
+            parts = prediction.split()
+            direction = parts[0]   # "Over" ou "Under"
+            threshold = float(parts[1])  # ex. 2.5
+            if direction == "Over" and total_g > threshold:
+                return True, f"Le marché '{prediction}' est déjà acquis ({total_g} buts). Sélection interdite."
+            if direction == "Under" and total_g > threshold:
+                return True, f"Le marché '{prediction}' est déjà raté ({total_g} buts). Sélection interdite."
+        except (IndexError, ValueError):
+            pass
+
+    # ── BTTS : déjà résolu ───────────────────────────────────────────────
+    if market == "BTTS":
+        btts_done = home_g >= 1 and away_g >= 1
+        if prediction == "GG Oui" and btts_done:
+            return True, f"BTTS Oui est déjà acquis ({home_g}-{away_g}). Sélection interdite."
+        if prediction == "GG Non" and btts_done:
+            return True, f"BTTS Non est déjà impossible ({home_g}-{away_g}). Sélection interdite."
+
+    # ── Score Exact : score actuel dépasse déjà la prédiction ───────────
+    if market == "Score Exact":
+        try:
+            ph, pa = map(int, prediction.split("-"))
+            if home_g > ph or away_g > pa:
+                return True, f"Score exact '{prediction}' impossible — score actuel {home_g}-{away_g}."
+        except (ValueError, AttributeError):
+            pass
+
+    # ── Over/Under Corners (>= 70 min, la majorité des corners sont pris) ─
+    if market == "Corners" and minute >= 80:
+        return True, f"Marché Corners indisponible — match trop avancé ({minute}')."
+
+    # ── Cartons idem ────────────────────────────────────────────────────
+    if market == "Cartons" and minute >= 80:
+        return True, f"Marché Cartons indisponible — match trop avancé ({minute}')."
+
+    return False, ""
+
+
 def _match_label(m: Dict) -> str:
     """Génère un label enrichi pour un match dans le selectbox."""
     mtype = m.get("_type", "")
@@ -274,18 +349,34 @@ def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], 
         label_visibility="collapsed",
     )
 
+    # ── Alerte temps réel : marché déjà expiré ───────────────────────────
+    if prediction != "—":
+        _exp, _reason = _market_is_expired(selected_match, market, prediction)
+        if _exp:
+            st.markdown(
+                f"<div style='background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.5);"
+                f"border-radius:10px;padding:10px 14px;margin:8px 0;'>"
+                f"<span style='color:#ef4444;font-weight:800;'>🚫 Marché invalide</span><br>"
+                f"<span style='color:#fca5a5;font-size:0.85rem;'>{_reason}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
     # ── Bouton Ajouter ────────────────────────────────────────────────────
     st.markdown("<div style='margin-top:6px;'>", unsafe_allow_html=True)
     if st.button("➕ Ajouter cette sélection au ticket", use_container_width=True, type="secondary"):
         if prediction == "—":
             st.warning("Prédiction invalide pour ce marché.")
         else:
+            # Vérifier que l'événement du marché n'a pas déjà eu lieu
+            expired, exp_reason = _market_is_expired(selected_match, market, prediction)
+            if expired:
+                st.error(f"🚫 Sélection refusée — {exp_reason}")
             # Vérifier doublon dans le ticket en cours
-            exists = any(
+            elif any(
                 s["fixture_id"] == selected_match.get("fixture_id") and s["market"] == market
                 for s in st.session_state.bet_selections
-            )
-            if exists:
+            ):
                 st.warning(f"Ce marché ({market}) est déjà dans votre ticket pour ce match.")
             elif len(st.session_state.bet_selections) >= 8:
                 st.warning("Maximum 8 sélections par ticket.")

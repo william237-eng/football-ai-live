@@ -11,6 +11,7 @@ from components.betting_page import render_betting_page
 from modules.top_over25_live.top_over25_ui import render_top_over25_page
 from modules.daily_predictions.daily_predictions_ui import render_daily_predictions_page
 from modules.history_results.history_results_ui import render_history_page
+from modules.top_under25_live.under25_ui import render_top_under25_page
 from services.football_api import FootballAPI, ConfigError, APIError, RateLimitError, NetworkError
 from services.live_matches import LiveMatchesService
 from services.future_matches import FutureMatchesService
@@ -240,6 +241,14 @@ def main():
         # =========================
         if active_page == "daily":
             render_daily_predictions_page(api=api)
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: TOP UNDER 2.5
+        # =========================
+        if active_page == "under25":
+            render_top_under25_page(api=api)
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
