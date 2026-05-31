@@ -340,9 +340,61 @@ ul[data-baseweb="menu"],
 [data-testid="stSidebar"] * {
   color: #111111 !important;
 }
-/* Boutons: garder fond coloré texte blanc */
+/* ── Header Streamlit natif (barre noire en haut) ── */
+[data-testid="stHeader"],
+[data-testid="stHeader"] *,
+header[data-testid="stHeader"],
+.stApp > header,
+.stApp > div > header {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e0e0e0 !important;
+  color: #111111 !important;
+}
+/* ── Toolbar / deploy bar (barre noire milieu) ── */
+[data-testid="stToolbar"],
+[data-testid="stToolbar"] *,
+[data-testid="stDecoration"],
+[data-testid="stDecoration"] *,
+.stDeployButton,
+.stDeployButton *,
+[data-testid="stStatusWidget"],
+[data-testid="stStatusWidget"] * {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #111111 !important;
+  border-color: #e0e0e0 !important;
+}
+/* ── Barre de progression en haut de page (loader) ── */
+[data-testid="stTopProgressBar"] {
+  background: #e0e0e0 !important;
+}
+/* ── Boutons secondary : fond gris clair, texte noir ── */
+.stButton > button[kind="secondary"],
+.stButton > button[data-testid*="secondary"] {
+  background: #e8e8e8 !important;
+  background-color: #e8e8e8 !important;
+  color: #111111 !important;
+  border: 1px solid #cccccc !important;
+}
+.stButton > button[kind="secondary"]:hover {
+  background: #d8d8d8 !important;
+  color: #111111 !important;
+}
+/* ── Boutons primary : gradient bleu, texte blanc ── */
+.stButton > button[kind="primary"],
 .stButton > button {
   color: #ffffff !important;
+}
+/* ── AppView container et main block ── */
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewBlockContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+.main, .main > div,
+[data-testid="block-container"] {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
 }
 /* Progress bar fond gris clair */
 .stProgress {
@@ -352,7 +404,69 @@ ul[data-baseweb="menu"],
 div[style*="background"] {
   color: #111111 !important;
 }
+/* ── File uploader ── */
+[data-testid="stFileUploader"],
+[data-testid="stFileUploader"] > div,
+[data-testid="stFileUploader"] section,
+[data-testid="stFileUploader"] section > div,
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stFileUploaderDropzoneInstructions"],
+.stFileUploader,
+.stFileUploader > div,
+.stFileUploader section {
+  background: #f0f0f0 !important;
+  background-color: #f0f0f0 !important;
+  border-color: #cccccc !important;
+  color: #111111 !important;
+}
+[data-testid="stFileUploader"] span,
+[data-testid="stFileUploader"] p,
+[data-testid="stFileUploader"] small,
+[data-testid="stFileUploader"] button,
+[data-testid="stFileUploaderDropzoneInstructions"] span,
+[data-testid="stFileUploaderDropzoneInstructions"] small {
+  color: #333333 !important;
+  background: transparent !important;
+}
+[data-testid="stFileUploader"] button[data-testid="baseButton-secondary"],
+[data-testid="stFileUploader"] button {
+  background: #e0e0e0 !important;
+  border: 1px solid #aaaaaa !important;
+  color: #111111 !important;
+}
+[data-testid="stFileUploader"] button:hover {
+  background: #d0d0d0 !important;
+}
 """ if force_black else ""}
+
+{"""
+/* ===== THEME LIGHT PRO - correctifs file uploader ===== */
+[data-testid="stFileUploader"],
+[data-testid="stFileUploader"] > div,
+[data-testid="stFileUploader"] section,
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stFileUploaderDropzoneInstructions"] {
+  background: #f5f5f7 !important;
+  background-color: #f5f5f7 !important;
+  border-color: #d0d0d8 !important;
+  color: #1a1a2e !important;
+}
+[data-testid="stFileUploader"] span,
+[data-testid="stFileUploader"] p,
+[data-testid="stFileUploader"] small,
+[data-testid="stFileUploaderDropzoneInstructions"] span {
+  color: #4a4a5a !important;
+  background: transparent !important;
+}
+[data-testid="stFileUploader"] button {
+  background: #e8e8ef !important;
+  border: 1px solid #c0c0c8 !important;
+  color: #1a1a2e !important;
+}
+[data-testid="stFileUploader"] button:hover {
+  background: #dcdce8 !important;
+}
+""" if (is_light and not force_black) else ""}
 
 /* ===== GLASSMORPHISM CARDS ===== */
 .glass-card {{

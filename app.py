@@ -5,7 +5,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from components import sidebar, header
-from components.header import get_search_query, matches_search_filter, render_datetime_header
+from components.header import get_search_query, matches_search_filter, matches_search_score, render_datetime_header
 from components.analysis_dashboard import render_analysis_dashboard
 from components.betting_page import render_betting_page
 from modules.top_over25_live.top_over25_ui import render_top_over25_page
@@ -45,42 +45,6 @@ def apply_background_theme():
     pass
 
 
-def render_theme_selector():
-    """Affiche le selecteur de thème dans le header"""
-    current_theme = get_current_theme()
-    
-    col1, col2, col3 = st.columns([1, 1, 1])
-
-    with col1:
-        if st.button(
-            "🌙 Dark",
-            key="theme_dark",
-            type="primary" if current_theme == "dark_pro" else "secondary",
-            use_container_width=True
-        ):
-            set_theme("dark_pro")
-            st.rerun()
-
-    with col2:
-        if st.button(
-            "☀️ Light",
-            key="theme_light",
-            type="primary" if current_theme == "light_pro" else "secondary",
-            use_container_width=True
-        ):
-            set_theme("light_pro")
-            st.rerun()
-
-    with col3:
-        if st.button(
-            "⬜ Blanc",
-            key="theme_white",
-            type="primary" if current_theme == "white_clean" else "secondary",
-            use_container_width=True
-        ):
-            set_theme("white_clean")
-            st.rerun()
-
 
 def get_query_param(name: str):
     value = st.query_params.get(name)
@@ -109,12 +73,6 @@ def main():
     apply_background_theme()
     active_page = st.session_state.get("active_page", "live")
     header.render_header(page=active_page)
-
-    # Theme selector
-    with st.container():
-        st.markdown("<div style='margin: 8px 0;'>", unsafe_allow_html=True)
-        render_theme_selector()
-        st.markdown("</div>", unsafe_allow_html=True)
 
     with st.container():
         st.markdown("<div class='content-area'>", unsafe_allow_html=True)
@@ -378,8 +336,9 @@ def main():
             search_query = get_search_query()
             if search_query:
                 filtered = [m for m in filtered if matches_search_filter(m, search_query)]
-
-            filtered.sort(key=lambda x: x.get("start_ts", 0))
+                filtered.sort(key=lambda x: -matches_search_score(x, search_query))
+            else:
+                filtered.sort(key=lambda x: x.get("start_ts", 0))
             st.session_state["future_match_count"] = len(filtered)
 
             if not filtered:
@@ -558,6 +517,7 @@ def main():
         search_query = get_search_query()
         if search_query:
             matches = [m for m in matches if matches_search_filter(m, search_query)]
+            matches = sorted(matches, key=lambda x: -matches_search_score(x, search_query))
 
         fetched_at = meta.get("fetched_at") if meta else None
 
