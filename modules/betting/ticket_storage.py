@@ -247,6 +247,39 @@ def update_item_result(item_id: int, result: str) -> None:
         )
 
 
+def delete_ticket(ticket_id: int, user_id: int = DEFAULT_USER_ID) -> bool:
+    """
+    Supprime complètement un ticket et tous ses items.
+    Retourne True si succès, False si erreur.
+    """
+    try:
+        with _get_conn() as conn:
+            # Vérifier que le ticket appartient à l'utilisateur
+            ticket = conn.execute(
+                "SELECT ticket_id FROM bet_tickets WHERE ticket_id = ? AND user_id = ?",
+                (ticket_id, user_id)
+            ).fetchone()
+            
+            if not ticket:
+                return False
+            
+            # Supprimer d'abord les items du ticket
+            conn.execute(
+                "DELETE FROM bet_items WHERE ticket_id = ?",
+                (ticket_id,)
+            )
+            
+            # Supprimer le ticket lui-même
+            conn.execute(
+                "DELETE FROM bet_tickets WHERE ticket_id = ? AND user_id = ?",
+                (ticket_id, user_id)
+            )
+            
+            return True
+    except Exception:
+        return False
+
+
 def has_duplicate_ticket(user_id: int, fixture_ids: List[int], predictions: List[str]) -> bool:
     """Vérifie si un ticket identique (mêmes fixtures + prédictions) existe déjà ACTIVE."""
     tickets = get_user_tickets(user_id, status="ACTIVE")

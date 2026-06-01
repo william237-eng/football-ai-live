@@ -7,11 +7,12 @@ from dotenv import load_dotenv
 from components import sidebar, header
 from components.header import get_search_query, matches_search_filter, matches_search_score, render_datetime_header
 from components.analysis_dashboard import render_analysis_dashboard
-from components.betting_page import render_betting_page
+from components.betting_page import render_betting_page, render_floating_bet_button
 from modules.top_over25_live.top_over25_ui import render_top_over25_page
 from modules.daily_predictions.daily_predictions_ui import render_daily_predictions_page
 from modules.history_results.history_results_ui import render_history_page
 from modules.top_under25_live.under25_ui import render_top_under25_page
+from modules.top_victories.victory_ui import render_top_victories_page
 from services.football_api import FootballAPI, ConfigError, APIError, RateLimitError, NetworkError
 from services.live_matches import LiveMatchesService
 from services.future_matches import FutureMatchesService
@@ -71,6 +72,7 @@ def main():
 
     sidebar.render_sidebar()
     apply_background_theme()
+
     active_page = st.session_state.get("active_page", "live")
     header.render_header(page=active_page)
 
@@ -183,6 +185,14 @@ def main():
                 pass
 
             render_betting_page(api=api, live_matches=_live_bets, future_matches=_future_bets)
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: TOP VICTOIRES IA
+        # =========================
+        if active_page == "victories":
+            render_top_victories_page(api=api)
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
@@ -380,6 +390,9 @@ def main():
                 st.markdown("</div>", unsafe_allow_html=True)
                 return
 
+            # ── Bouton ticket flottant (avant la liste) ──────────────
+            render_floating_bet_button(api)
+
             # --- Grouper par compétition ---
             grouped_future: Dict[str, list] = {}
             for m in filtered:
@@ -452,7 +465,7 @@ def main():
                             if venue:
                                 st.caption(f"📍 {venue}")
                             disabled = not all([fixture_id, home_team_id, away_team_id, league_id_val, season])
-                            if st.button("📊 Analyser", key=f"future_analyze_{fixture_id}_{index}", disabled=disabled, use_container_width=True):
+                            if st.button("📊", key=f"future_analyze_{fixture_id}_{index}", disabled=disabled, help="Analyser", use_container_width=True):
                                 st.session_state["active_page"] = "analysis"
                                 st.query_params["analysis_fixture"] = str(fixture_id)
                                 st.query_params["home_team"] = str(home_team_id)
@@ -461,6 +474,20 @@ def main():
                                 st.query_params["season"] = str(season)
                                 st.rerun()
                         st.markdown("</div>", unsafe_allow_html=True)
+                    # ── Bouton Paris ─────────────────────────────────────────
+                    with st.container():
+                        bet_cols = st.columns([6, 1])
+                        with bet_cols[1]:
+                            opened_f = st.session_state.get(f"bet_open_{fixture_id}", False)
+                            label_f  = "🔒 Fermer" if opened_f else "🎰 Parier"
+                            if st.button(label_f, key=f"fut_bet_{fixture_id}_{index}", use_container_width=True):
+                                st.session_state[f"bet_open_{fixture_id}"] = not opened_f
+                                st.rerun()
+
+                    # ── Panneau paris déroulant ──────────────────────────────
+                    if st.session_state.get(f"bet_open_{fixture_id}", False):
+                        from components.betting_page import render_inline_bet_panel
+                        render_inline_bet_panel(m, match_type="future")
 
             st.markdown("</div>", unsafe_allow_html=True)
             return
@@ -468,8 +495,8 @@ def main():
         st.markdown(
             """
             <script>
-            // reload the page every 15 seconds to get fresh data
-            setTimeout(function(){ window.location.reload(); }, 15000);
+            // DÉSACTIVÉ : Rechargement automatique cause des ventes involontaires
+            // setTimeout(function(){ window.location.reload(); }, 15000);
             </script>
             """,
             unsafe_allow_html=True,
@@ -565,6 +592,9 @@ def main():
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
+        # ── Bouton ticket flottant (avant la liste) ──────────────────
+        render_floating_bet_button(api)
+
         total_matches = len(matches)
         info_parts = [f"**{total_matches}** match(s) en direct"]
         if search_query:
@@ -583,101 +613,92 @@ def main():
                 grouped[key] = {"items": [], "country": country, "flag": flag}
             grouped[key]["items"].append(m)
 
-        parts = ["<div class='matches-list-container'>"]
-        for league, info in grouped.items():
-            items = info.get("items", [])
+        from components.betting_page import render_inline_bet_panel
+
+        for league_name, info in grouped.items():
+            items   = info.get("items", [])
             country = info.get("country") or ""
-            flag = info.get("flag") or ""
-            # competition header: include country flag image and country name if available
-            # NOTE: `comp-header` is hidden by CSS, but we still generate valid HTML to avoid layout glitches.
-            country_html = (
-                f"<img src='{flag}' class='comp-country-flag' alt='{country}' onerror=\"this.style.display='none'\"/>"
-                f" <span class='comp-country'>{country}</span>"
-                if flag or country
-                else ""
+            flag    = info.get("flag") or ""
+            flag_html = (
+                f"<img src='{flag}' width='16' style='vertical-align:middle;margin-right:5px;"
+                f"border-radius:2px;' onerror=\"this.style.display='none'\"/>"
+                if flag else ""
             )
-            parts.append(
-                "<div class='comp-block'>"
-                "<div class='comp-matches'>"
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:6px;padding:8px 0 4px;"
+                f"border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:6px;'>"
+                f"{flag_html}<span style='font-weight:700;font-size:0.92rem;'>{league_name}</span>"
+                f"<span style='color:#888;font-size:0.78rem;margin-left:4px;'>{country}</span>"
+                f"<span style='margin-left:auto;color:#888;font-size:0.78rem;'>{len(items)} match(s)</span>"
+                f"</div>",
+                unsafe_allow_html=True,
             )
 
-            for it in items:
-                home = it.get("home_team") or "—"
-                away = it.get("away_team") or "—"
-                home_logo = it.get("home_logo") or ""
-                away_logo = it.get("away_logo") or ""
-                minute = it.get("minute")
-                status = it.get("status") or ""
-                venue = it.get("venue") or ""
-                fixture_id = it.get("fixture_id")
+            for idx, it in enumerate(items):
+                home        = it.get("home_team") or "—"
+                away        = it.get("away_team") or "—"
+                home_logo   = it.get("home_logo") or ""
+                away_logo   = it.get("away_logo") or ""
+                minute      = it.get("minute")
+                status      = it.get("status") or ""
+                home_score  = it.get("home_score")
+                away_score  = it.get("away_score")
+                fixture_id  = it.get("fixture_id")
                 home_team_id = it.get("home_team_id")
                 away_team_id = it.get("away_team_id")
-                league_id = it.get("league_id")
-                season = it.get("season")
-                analysis_link = "#"
-                if fixture_id and home_team_id and away_team_id and league_id and season:
-                    analysis_link = (
-                        f"?analysis_fixture={fixture_id}&home_team={home_team_id}"
-                        f"&away_team={away_team_id}&league={league_id}&season={season}"
+                league_id   = it.get("league_id")
+                season      = it.get("season")
+
+                minute_text   = f"{minute}'" if minute is not None and str(minute).strip() else "LIVE"
+                hs = home_score if home_score is not None else "-"
+                as_ = away_score if away_score is not None else "-"
+
+                with st.container():
+                    st.markdown(
+                        f"<div style='background:linear-gradient(135deg,rgba(255,255,255,0.05),"
+                        f"rgba(255,255,255,0.02));border:1px solid rgba(220,38,38,0.25);"
+                        f"border-left:3px solid #dc2626;border-radius:10px;"
+                        f"padding:10px 14px;margin-bottom:4px;'>",
+                        unsafe_allow_html=True,
                     )
-                minute_text = f"{minute}'" if minute is not None and str(minute).strip() != "" else ""
-                score_display = (
-                    f"{it.get('home_score') if it.get('home_score') is not None else '-'}"
-                    f" - {it.get('away_score') if it.get('away_score') is not None else '-'}"
-                )
+                    row_cols = st.columns([3, 2, 3, 1, 1])
+                    with row_cols[0]:
+                        logo_h = f"<img src='{home_logo}' width='22' style='vertical-align:middle;margin-right:6px;border-radius:3px;' onerror=\"this.style.display='none'\"/>" if home_logo else ""
+                        st.markdown(f"{logo_h}**{home}**", unsafe_allow_html=True)
+                    with row_cols[1]:
+                        st.markdown(
+                            f"<div style='text-align:center;'>"
+                            f"<span style='background:#dc2626;color:#fff;border-radius:4px;"
+                            f"padding:2px 7px;font-size:0.68rem;font-weight:900;'>● {minute_text}</span><br>"
+                            f"<span style='font-size:1.1rem;font-weight:900;color:#fff;'>{hs} – {as_}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with row_cols[2]:
+                        logo_a = f"<img src='{away_logo}' width='22' style='vertical-align:middle;margin-right:6px;border-radius:3px;' onerror=\"this.style.display='none'\"/>" if away_logo else ""
+                        st.markdown(f"{logo_a}**{away}**", unsafe_allow_html=True)
+                    with row_cols[3]:
+                        disabled_analyze = not all([fixture_id, home_team_id, away_team_id, league_id, season])
+                        if st.button("📊", key=f"lv_analyze_{fixture_id}_{idx}", disabled=disabled_analyze, help="Analyser"):
+                            st.session_state["active_page"] = "analysis"
+                            st.query_params["analysis_fixture"] = str(fixture_id)
+                            st.query_params["home_team"] = str(home_team_id)
+                            st.query_params["away_team"] = str(away_team_id)
+                            st.query_params["league"] = str(league_id)
+                            st.query_params["season"] = str(season)
+                            st.rerun()
+                    with row_cols[4]:
+                        bet_key = f"lv_bet_{fixture_id}_{idx}"
+                        opened = st.session_state.get(f"bet_open_{fixture_id}", False)
+                        label  = "🔒" if opened else "🎰"
+                        if st.button(label, key=bet_key, help="Parier sur ce match"):
+                            st.session_state[f"bet_open_{fixture_id}"] = not opened
+                            st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-                league_flag = it.get('league_flag') or ''
-                league_country = it.get('league_country') or ''
-                country_html = (
-                    f"<img src='{league_flag}' class='comp-country-flag' alt='{league_country}' onerror=\"this.style.display='none'\"/> <span class='comp-country-small'>{league_country}</span>"
-                    if league_flag or league_country
-                    else ""
-                )
-
-                # Special stacked presentation for OshMU Aldier
-                special_team = "OshMU Aldier"
-                if home == special_team or away == special_team:
-                    # determine which side is the opponent
-                    if home == special_team:
-                        osh_name = home
-                        osh_logo = home_logo
-                        opp_name = away
-                        opp_logo = away_logo
-                    else:
-                        osh_name = away
-                        osh_logo = away_logo
-                        opp_name = home
-                        opp_logo = home_logo
-
-                    row_html = (
-                        "<div class='match-row'>"
-                        "<div class='match-band special'>"
-                        f"  <div class='special-left'><div class='team-name-big'>{osh_name}</div></div>"
-                        f"  <div class='special-center'><div class='score'>{score_display}</div><div class='minute-text-small'>{minute_text} {status}</div></div>"
-                        f"  <div class='special-right'><div class='team-name-big'>{opp_name}</div></div>"
-                        f"  <div class='band-meta'><div class='competition-name'>{league} {country_html}</div><div class='meta-line'>{venue}</div><a class='analysis-button compact' href='{analysis_link}'>📊 Analyser</a></div>"
-                        "</div>"
-                        "</div>"
-                    )
-                else:
-                    row_html = (
-                        "<div class='match-row'>"
-                        "<div class='match-band'>"
-                        f"  <div class='team team-left'><img src='{home_logo}' class='logo' alt='{home}' onerror=\"this.style.display='none'\"/><div class='team-name'>{home}</div></div>"
-                        f"  <div class='band-center'><div class='score'>{score_display}</div><div class='minute-text-small'>{minute_text} {status}</div></div>"
-                        f"  <div class='team team-right'><img src='{away_logo}' class='logo' alt='{away}' onerror=\"this.style.display='none'\"/><div class='team-name'>{away}</div></div>"
-                        f"  <div class='band-meta'><div class='competition-name'>{league} {country_html}</div><div class='meta-line'>{venue}</div><a class='analysis-button compact' href='{analysis_link}'>📊 Analyser</a></div>"
-                        "</div>"
-                        "</div>"
-                    )
-                parts.append(row_html)
-
-            parts.append("</div></div>")
-
-        parts.append("</div>")
-        full_html = "\n".join(parts)
-
-        st.markdown(full_html, unsafe_allow_html=True)
+                # ── Panneau paris déroulant ──────────────────────────────────
+                if st.session_state.get(f"bet_open_{fixture_id}", False):
+                    render_inline_bet_panel(it, match_type="live")
 
         st.markdown("</div>", unsafe_allow_html=True)
 

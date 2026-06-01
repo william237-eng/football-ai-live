@@ -8,7 +8,7 @@ Sélectionne TOP 10 par rubrique, analyse basée sur forme récente + stats.
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -275,6 +275,33 @@ MIN_CORNER_PROB = 0.45   # combiné corners+cartons (plus difficile à atteindre
 TOP_N           = 10
 
 
+def _empty_results() -> Dict[str, List[Dict[str, Any]]]:
+    return {"wins": [], "double_chance": [], "btts": [], "corners_cards": []}
+
+
+def _build_justification(market: str, prediction: str, home_stats: Dict, away_stats: Dict, probs: Dict) -> str:
+    if market == "VICTOIRE":
+        return (
+            f"Choix basé sur la forme récente et l'attaque : "
+            f"home win-rate {round(home_stats['win_rate']*100)}%, away win-rate {round(away_stats['win_rate']*100)}%, "
+            f"xG estimé {probs.get('lam_h', 0)}-{probs.get('lam_a', 0)}."
+        )
+    if market == "DOUBLE CHANCE":
+        return (
+            f"Protection choisie car le match semble plus sûr en couverture : "
+            f"1X {round(probs['dc_1x']*100)}%, X2 {round(probs['dc_x2']*100)}%, 12 {round(probs['dc_12']*100)}%."
+        )
+    if market == "GG (BTTS)":
+        return (
+            f"Les deux équipes ont un profil offensif : "
+            f"BTTS home {round(home_stats['btts_rate']*100)}%, away {round(away_stats['btts_rate']*100)}%."
+        )
+    return (
+        f"Match à forte intensité estimée : corners {round(probs['p_over_corners']*100)}%, "
+        f"cartons {round(probs['p_over_cards']*100)}%."
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Point d'entrée : analyse d'une liste de fixtures
 # ─────────────────────────────────────────────────────────────────────────────
@@ -298,6 +325,7 @@ def analyze_fixtures_for_daily(
     dc_list      = []
     btts_list    = []
     cc_list      = []
+    top_candidates = []
 
     for fx in fixtures:
         info = _base_match_info(fx)
@@ -333,14 +361,23 @@ def analyze_fixtures_for_daily(
             "cc_probs":   cc_probs,
         }
 
-        # ── Victoire la plus probable ─────────────────────────────────────
         ph, pa = win_probs["p_home"], win_probs["p_away"]
         best_win_prob = max(ph, pa)
         best_win_team = info["home_name"] if ph >= pa else info["away_name"]
         best_win_side = "home" if ph >= pa else "away"
-        if best_win_prob >= MIN_WIN_PROB:
-            conf_lbl, conf_col = _confidence_label(best_win_prob)
-            wins_list.append({
+        best_dc_key  = max(dc_probs, key=lambda k: dc_probs[k])
+        best_dc_prob = dc_probs[best_dc_key]
+        dc_labels    = {
+            "dc_1x": f"{info['home_name']} ou Nul (1X)",
+            "dc_x2": f"Nul ou {info['away_name']} (X2)",
+            "dc_12": f"{info['home_name']} ou {info['away_name']} (12)",
+        }
+        p_comb = cc_probs["p_combined"]
+
+        match_predictions = []
+
+        conf_lbl, conf_col = _confidence_label(best_win_prob)
+        match_predictions.append({
                 **base,
                 "market":        "VICTOIRE",
                 "prediction":    best_win_team,
@@ -350,19 +387,12 @@ def analyze_fixtures_for_daily(
                 "conf_label":    conf_lbl,
                 "conf_color":    conf_col,
                 "detail":        f"P(home)={round(ph*100,1)}% · P(away)={round(pa*100,1)}%",
+                "justification": _build_justification("VICTOIRE", best_win_team, home_stats, away_stats, win_probs),
+                "_rank_score": best_win_prob if best_win_prob >= MIN_WIN_PROB else best_win_prob * 0.86,
             })
 
-        # ── Double Chance ──────────────────────────────────────────────────
-        best_dc_key  = max(dc_probs, key=lambda k: dc_probs[k])
-        best_dc_prob = dc_probs[best_dc_key]
-        dc_labels    = {
-            "dc_1x": f"{info['home_name']} ou Nul (1X)",
-            "dc_x2": f"Nul ou {info['away_name']} (X2)",
-            "dc_12": f"{info['home_name']} ou {info['away_name']} (12)",
-        }
-        if best_dc_prob >= MIN_DC_PROB:
-            conf_lbl, conf_col = _confidence_label(best_dc_prob)
-            dc_list.append({
+        conf_lbl, conf_col = _confidence_label(best_dc_prob)
+        match_predictions.append({
                 **base,
                 "market":        "DOUBLE CHANCE",
                 "prediction":    dc_labels[best_dc_key],
@@ -372,12 +402,12 @@ def analyze_fixtures_for_daily(
                 "conf_label":    conf_lbl,
                 "conf_color":    conf_col,
                 "detail":        f"1X={round(dc_probs['dc_1x']*100,1)}% · X2={round(dc_probs['dc_x2']*100,1)}% · 12={round(dc_probs['dc_12']*100,1)}%",
+                "justification": _build_justification("DOUBLE CHANCE", dc_labels[best_dc_key], home_stats, away_stats, dc_probs),
+                "_rank_score": best_dc_prob if best_dc_prob >= MIN_DC_PROB else best_dc_prob * 0.82,
             })
 
-        # ── GG / BTTS ──────────────────────────────────────────────────────
-        if btts_prob >= MIN_BTTS_PROB:
-            conf_lbl, conf_col = _confidence_label(btts_prob)
-            btts_list.append({
+        conf_lbl, conf_col = _confidence_label(btts_prob)
+        match_predictions.append({
                 **base,
                 "market":        "GG (BTTS)",
                 "prediction":    "Les deux équipes marquent",
@@ -386,13 +416,12 @@ def analyze_fixtures_for_daily(
                 "conf_label":    conf_lbl,
                 "conf_color":    conf_col,
                 "detail":        f"Taux hist. GG : home={round(home_stats['btts_rate']*100)}% · away={round(away_stats['btts_rate']*100)}%",
+                "justification": _build_justification("GG (BTTS)", "Les deux équipes marquent", home_stats, away_stats, win_probs),
+                "_rank_score": btts_prob if btts_prob >= MIN_BTTS_PROB else btts_prob * 0.80,
             })
 
-        # ── Corners + Cartons ──────────────────────────────────────────────
-        p_comb = cc_probs["p_combined"]
-        if p_comb >= MIN_CORNER_PROB:
-            conf_lbl, conf_col = _confidence_label(p_comb)
-            cc_list.append({
+        conf_lbl, conf_col = _confidence_label(p_comb)
+        match_predictions.append({
                 **base,
                 "market":        "CORNERS + CARTONS",
                 "prediction":    "Over 7.5 corners + 3 cartons jaunes",
@@ -403,19 +432,29 @@ def analyze_fixtures_for_daily(
                 "p_corners":     cc_probs["p_over_corners"],
                 "p_cards":       cc_probs["p_over_cards"],
                 "detail":        f"Corners Over 7.5 : {round(cc_probs['p_over_corners']*100,1)}% · Cartons ≥3 : {round(cc_probs['p_over_cards']*100,1)}%",
+                "justification": _build_justification("CORNERS + CARTONS", "Over 7.5 corners + 3 cartons jaunes", home_stats, away_stats, cc_probs),
+                "_rank_score": p_comb if p_comb >= MIN_CORNER_PROB else p_comb * 0.78,
             })
 
-    # ── Tri par probabilité décroissante + TOP 10 ──────────────────────────
-    wins_list.sort(key=lambda x: x["prob"], reverse=True)
-    dc_list.sort(key=lambda x: x["prob"], reverse=True)
-    btts_list.sort(key=lambda x: x["prob"], reverse=True)
-    cc_list.sort(key=lambda x: x["prob"], reverse=True)
+        top_candidates.append(max(match_predictions, key=lambda x: x["_rank_score"]))
+
+    top_candidates.sort(key=lambda x: x["_rank_score"], reverse=True)
+    for prediction in top_candidates[:TOP_N]:
+        prediction.pop("_rank_score", None)
+        if prediction["market"] == "VICTOIRE":
+            wins_list.append(prediction)
+        elif prediction["market"] == "DOUBLE CHANCE":
+            dc_list.append(prediction)
+        elif prediction["market"] == "GG (BTTS)":
+            btts_list.append(prediction)
+        else:
+            cc_list.append(prediction)
 
     return {
-        "wins":          wins_list[:TOP_N],
-        "double_chance": dc_list[:TOP_N],
-        "btts":          btts_list[:TOP_N],
-        "corners_cards": cc_list[:TOP_N],
+        "wins":          wins_list,
+        "double_chance": dc_list,
+        "btts":          btts_list,
+        "corners_cards": cc_list,
     }
 
 
@@ -429,7 +468,10 @@ def fetch_daily_predictions(api) -> Dict[str, List[Dict[str, Any]]]:
     """
     from modules.top_over25_live.league_blacklist import is_blacklisted
 
-    today_str = date.today().isoformat()
+    local_tz = datetime.now().astimezone().tzinfo
+    today_start = datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(hours=23, minutes=59, seconds=59)
+    today_str = today_start.date().isoformat()
     raw_items: List[Dict] = []
 
     try:
@@ -438,17 +480,44 @@ def fetch_daily_predictions(api) -> Dict[str, List[Dict[str, Any]]]:
             raw_items = raw["response"] or []
         elif isinstance(raw, list):
             raw_items = raw
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ DAILY PREDICTIONS: fixtures today fetch failed: {e}")
 
     # Filtrer : seulement NS + pas blacklistés
     fixtures = []
     for fx in raw_items:
+        fixture = fx.get("fixture") or {}
         status_short = (fx.get("fixture") or {}).get("status", {}).get("short", "NS")
         if status_short not in ("NS", "TBD"):
             continue
         if is_blacklisted(fx):
             continue
+        match_dt = _parse_datetime(fixture.get("date", ""))
+        if match_dt and not (today_start <= match_dt <= today_end):
+            continue
         fixtures.append(fx)
 
-    return analyze_fixtures_for_daily(fixtures)
+    recent_map: Dict[int, List[Dict]] = {}
+    for fx in fixtures[:40]:
+        info = _base_match_info(fx)
+        for team_id in (info.get("home_id"), info.get("away_id")):
+            if not team_id or team_id in recent_map:
+                continue
+            try:
+                if hasattr(api, "get_team_recent_fixtures"):
+                    raw_recent = api.get_team_recent_fixtures(team_id, count=6)
+                else:
+                    raw_recent = api.get_team_fixtures(team_id=team_id, season=info.get("season"), last=6)
+                if isinstance(raw_recent, tuple):
+                    raw_recent = raw_recent[0]
+                if isinstance(raw_recent, dict) and "response" in raw_recent:
+                    recent_map[team_id] = raw_recent.get("response") or []
+                elif isinstance(raw_recent, list):
+                    recent_map[team_id] = raw_recent
+                else:
+                    recent_map[team_id] = []
+            except Exception as e:
+                print(f"⚠️ DAILY PREDICTIONS: recent fetch failed for team={team_id}: {e}")
+                recent_map[team_id] = []
+
+    return analyze_fixtures_for_daily(fixtures, recent_map=recent_map)

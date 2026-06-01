@@ -55,6 +55,7 @@ def _render_card(m: Dict[str, Any], accent: str) -> None:
     conf_col = m.get("conf_color", "#888")
     conf_lbl = m.get("conf_label", "—")
     detail   = m.get("detail", "")
+    justification = m.get("justification", "")
     pred     = m.get("prediction", "—")
     market   = m.get("market", "—")
 
@@ -131,6 +132,7 @@ def _render_card(m: Dict[str, Any], accent: str) -> None:
 
         # Détail
         (f"<div style='font-size:0.68rem;color:#666;margin-top:6px;'>{detail}</div>" if detail else ""),
+        (f"<div style='font-size:0.70rem;color:#94a3b8;margin-top:8px;line-height:1.35;'>🧠 {justification}</div>" if justification else ""),
 
         "</div>",
     ])
@@ -198,7 +200,7 @@ def render_daily_predictions_page(api) -> None:
     st.markdown(
         f"<h2 style='font-size:1.6rem;margin-bottom:2px;'>🔮 TOP PRÉDICTIONS DU JOUR</h2>"
         f"<p style='color:#888;font-size:0.85rem;margin-bottom:14px;'>"
-        f"Analyse automatique des matchs du {today_str} · TOP 10 par rubrique · "
+        f"Analyse automatique des matchs du {today_str} · TOP 10 global du jour · "
         f"<span style='color:#f59e0b;'>Probabilités estimées — pas de garantie</span></p>",
         unsafe_allow_html=True,
     )
@@ -236,7 +238,7 @@ def render_daily_predictions_page(api) -> None:
         results = cached
 
     dt_str = datetime.datetime.fromtimestamp(st.session_state.get(ts_key, now_ts)).strftime("%H:%M:%S")
-    st.caption(f"⏱️ Dernière analyse : {dt_str} · Rafraîchissement toutes les 5 min")
+    st.caption(f"⏱️ Dernière analyse : {dt_str} · Maximum 10 matchs du jour · Rafraîchissement toutes les 5 min")
 
     total = sum(len(v) for v in results.values())
     if total == 0:

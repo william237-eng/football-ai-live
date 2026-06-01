@@ -222,7 +222,11 @@ def validate_ticket(
 
         stats  = (stats_data  or {}).get(fid)
         events = (events_data or {}).get(fid)
-        result = check_item(item["market"], item["prediction"], fixture, stats, events)
+        if fixture.get("_synthetic"):
+            # Fixture synthétique (API indisponible, match passé) → LOST par défaut
+            result = "LOST"
+        else:
+            result = check_item(item["market"], item["prediction"], fixture, stats, events)
         update_item_result(item["id"], result)
 
         if result == "LOST":
@@ -259,6 +263,72 @@ def validate_ticket(
 # Vérifier tous les tickets actifs d'un utilisateur
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _fetch_fixture_robust(
+    api,
+    fid: int,
+    kick_off_iso: str = "",
+    ticket_created_at: str = "",
+) -> Optional[Dict]:
+    """
+    Tente de récupérer un fixture par ID.
+    Fallbacks :
+      1. get_fixture_detail direct
+      2. Si kick_off dépassé de +3h → fixture synthétique FT
+      3. Si ticket créé hier ou avant → fixture synthétique FT
+    """
+    from datetime import datetime, timezone, timedelta
+
+    # 1. Tentative directe
+    try:
+        raw = api.get_fixture_detail(fid)
+        if isinstance(raw, tuple):
+            raw = raw[0]
+        resp = (raw or {}).get("response") or []
+        if resp:
+            fx = resp[0]
+            # Si l'API renvoie bien le fixture, le retourner même s'il est NS/LIVE
+            return fx
+    except Exception:
+        pass
+
+    now = datetime.now(timezone.utc)
+
+    # 2. Fallback kick_off : si dépassé de +3h
+    ref_iso = kick_off_iso or ticket_created_at
+    if ref_iso:
+        try:
+            ref_dt = datetime.fromisoformat(ref_iso.replace("Z", "+00:00"))
+            if ref_dt.tzinfo is None:
+                ref_dt = ref_dt.replace(tzinfo=timezone.utc)
+            if now - ref_dt > timedelta(hours=3):
+                return {
+                    "fixture": {"id": fid, "status": {"short": "FT", "long": "Match Finished", "elapsed": 90}},
+                    "goals":   {"home": None, "away": None},
+                    "score":   {},
+                    "_synthetic": True,
+                }
+        except Exception:
+            pass
+
+    # 3. Fallback ultime : si le ticket date de plus d'un jour entier
+    if ticket_created_at:
+        try:
+            created_dt = datetime.fromisoformat(ticket_created_at.replace("Z", "+00:00"))
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
+            if now - created_dt > timedelta(hours=24):
+                return {
+                    "fixture": {"id": fid, "status": {"short": "FT", "long": "Match Finished", "elapsed": 90}},
+                    "goals":   {"home": None, "away": None},
+                    "score":   {},
+                    "_synthetic": True,
+                }
+        except Exception:
+            pass
+
+    return None
+
+
 def check_all_active_tickets(
     api,
     user_id: int = DEFAULT_USER_ID,
@@ -276,20 +346,27 @@ def check_all_active_tickets(
         items = get_ticket_items(ticket["ticket_id"])
         fids = list({i["fixture_id"] for i in items})
 
+        # Construire un mapping fid → kick_off depuis les items
+        kick_offs: Dict[int, str] = {
+            i["fixture_id"]: (i.get("kick_off") or i.get("start_datetime_local") or "")
+            for i in items
+        }
+
         fixtures_data: Dict[int, Dict] = {}
         events_data:   Dict[int, list] = {}
 
+        ticket_created_at = ticket.get("created_at", "")
         for fid in fids:
+            fx = _fetch_fixture_robust(api, fid, kick_offs.get(fid, ""), ticket_created_at)
+            if fx:
+                fixtures_data[fid] = fx
             try:
-                raw, _ = api.get_fixture(fid)
-                resp = (raw or {}).get("response") or []
-                if resp:
-                    obj = resp[0]
-                    fixtures_data[fid] = obj
-                    events_raw, _ = api.get_events(fid)
-                    events_data[fid] = (events_raw or {}).get("response") or []
+                ev_raw = api.get_fixture_events(fid)
+                if isinstance(ev_raw, tuple):
+                    ev_raw = ev_raw[0]
+                events_data[fid] = (ev_raw or {}).get("response") or []
             except Exception:
-                pass
+                events_data[fid] = []
 
         res = validate_ticket(ticket["ticket_id"], fixtures_data, events_data=events_data, user_id=user_id)
         results.append(res)

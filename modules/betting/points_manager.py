@@ -40,10 +40,10 @@ def get_points_info(user_id: int = DEFAULT_USER_ID) -> Dict[str, Any]:
     elapsed = now - last_refill.astimezone(timezone.utc)
     refill_in_seconds = max(0, REFILL_HOURS * 3600 - elapsed.total_seconds())
 
-    # Recharge seulement si : points == 0 ET aucun ticket ACTIVE en cours
+    # Recharge seulement si : points < TICKET_COST ET aucun ticket ACTIVE en cours
     has_active_ticket = bool(get_user_tickets(user_id, status="ACTIVE"))
-    eligible_refill   = (points == 0 and not has_active_ticket)
-    needs_refill      = (points == 0)
+    needs_refill      = (points < TICKET_COST)          # < 5 pts → impossible de parier
+    eligible_refill   = (needs_refill and not has_active_ticket)
 
     if eligible_refill and elapsed.total_seconds() >= REFILL_HOURS * 3600:
         points += REFILL_AMOUNT
@@ -51,15 +51,16 @@ def get_points_info(user_id: int = DEFAULT_USER_ID) -> Dict[str, Any]:
         update_last_refill(user_id)
         refill_in_seconds = REFILL_HOURS * 3600
         needs_refill = False
+        eligible_refill = False
 
     return {
-        "points":           points,
-        "can_bet":          points >= TICKET_COST,
-        "needs_refill":     needs_refill,
-        "eligible_refill":  eligible_refill,
+        "points":            points,
+        "can_bet":           points >= TICKET_COST,
+        "needs_refill":      needs_refill,
+        "eligible_refill":   eligible_refill,
         "has_active_ticket": has_active_ticket,
         "refill_in_seconds": int(refill_in_seconds),
-        "refill_in_label":  _format_refill(refill_in_seconds) if needs_refill else None,
+        "refill_in_label":   _format_refill(refill_in_seconds) if needs_refill else None,
     }
 
 
@@ -79,7 +80,11 @@ def deduct_points(user_id: int = DEFAULT_USER_ID, amount: int = TICKET_COST) -> 
     return True, f"{amount} ⭐ débités. Solde : {points - amount} ⭐"
 
 
-def credit_points(user_id: int = DEFAULT_USER_ID, amount: int = 0) -> None:
-    """Crédite des points de récompense."""
+def credit_points(user_id: int = DEFAULT_USER_ID, amount: int = 0) -> int:
+    """Crédite des points de récompense. Retourne le nouveau solde."""
     user = get_user(user_id)
-    update_points(user_id, user["points"] + amount)
+    old_points = user["points"]
+    new_points = old_points + amount
+    update_points(user_id, new_points)
+    print(f"✅ CREDIT_POINTS: User {user_id} +{amount} ⭐ ( {old_points} → {new_points} )")
+    return new_points

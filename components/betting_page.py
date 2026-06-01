@@ -11,9 +11,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from modules.betting.ticket_storage import (
-    init_db, get_user_tickets, get_ticket_items, DEFAULT_USER_ID,
+    init_db, get_user_tickets, get_ticket_items, delete_ticket, DEFAULT_USER_ID,
 )
 from modules.betting.points_manager import get_points_info
 from modules.betting.ticket_manager import (
@@ -250,9 +251,9 @@ def _render_ticket(
             f"🏆 Gain potentiel : {potential_pts} ⭐</span>"
         )
     elif status == "WON":
-        header_html += f"<span style='color:#22c55e;font-size:0.92rem;font-weight:800;'>+{reward} ⭐ GAGNÉ !</span>"
+        header_html += f"<span style='background:linear-gradient(135deg, #22c55e, #16a34a);color:white;font-size:0.95rem;font-weight:900;padding:4px 12px;border-radius:8px;'>🏆 GAGNÉ +{reward} ⭐</span>"
     elif status == "LOST":
-        header_html += f"<span style='color:#ef4444;font-size:0.85rem;font-weight:700;'>❌ Coupon perdu</span>"
+        header_html += f"<span style='background:linear-gradient(135deg, #ef4444, #dc2626);color:white;font-size:0.90rem;font-weight:800;padding:4px 12px;border-radius:8px;'>❌ PERDU</span>"
     elif status == "SOLD":
         sold_p = ticket.get("sold_price", 0)
         header_html += f"<span style='color:#a78bfa;font-size:0.85rem;'>💰 Vendu : {sold_p} ⭐</span>"
@@ -279,10 +280,41 @@ def _render_ticket(
             time_row = _live_time_badge(int(minute), int(h_score), int(a_score or 0), h_team, a_team)
         elif r in ("WON", "LOST"):
             ko_str = _format_kickoff(ko)
-            time_row = (
-                f"<div style='font-size:0.70rem;color:#6b7280;margin-bottom:4px;'>"
-                f"📅 {ko_str} · {h_team} vs {a_team}</div>"
-            ) if ko_str else f"<div style='font-size:0.70rem;color:#6b7280;margin-bottom:4px;'>{h_team} vs {a_team}</div>"
+            # Récupérer le score final depuis l'item
+            final_score = item.get("final_score", "")
+            if not final_score:
+                # Essayer de récupérer depuis les scores home/away si disponibles
+                home_goals = item.get("home_goals", 0)
+                away_goals = item.get("away_goals", 0)
+                if home_goals is not None and away_goals is not None:
+                    final_score = f"{home_goals}-{away_goals}"
+            
+            # Afficher avec le score final et la couleur appropriée
+            score_color = "#22c55e" if r == "WON" else "#ef4444"
+            status_icon = "✅" if r == "WON" else "❌"
+            
+            if final_score:
+                time_row = (
+                    f"<div style='font-size:0.70rem;color:#6b7280;margin-bottom:4px;'>"
+                    f"📅 {ko_str} · {h_team} vs {a_team}</div>"
+                    f"<div style='font-size:0.75rem;font-weight:700;color:{score_color};margin-bottom:2px;'>"
+                    f"{status_icon} Score final : {final_score}</div>"
+                ) if ko_str else (
+                    f"<div style='font-size:0.70rem;color:#6b7280;margin-bottom:4px;'>{h_team} vs {a_team}</div>"
+                    f"<div style='font-size:0.75rem;font-weight:700;color:{score_color};margin-bottom:2px;'>"
+                    f"{status_icon} Score final : {final_score}</div>"
+                )
+            else:
+                time_row = (
+                    f"<div style='font-size:0.70rem;color:#6b7280;margin-bottom:4px;'>"
+                    f"📅 {ko_str} · {h_team} vs {a_team}</div>"
+                    f"<div style='font-size:0.70rem;color:{score_color};margin-bottom:2px;'>"
+                    f"{status_icon} Match terminé</div>"
+                ) if ko_str else (
+                    f"<div style='font-size:0.70rem;color:#6b7280;margin-bottom:4px;'>{h_team} vs {a_team}</div>"
+                    f"<div style='font-size:0.70rem;color:{score_color};margin-bottom:2px;'>"
+                    f"{status_icon} Match terminé</div>"
+                )
         else:
             time_row = _future_time_badge(ko, h_team, a_team)
 
@@ -300,6 +332,14 @@ def _render_ticket(
             item_bg = "rgba(255,255,255,0.03)"
             item_border = "rgba(255,255,255,0.08)"
 
+        # Badge de statut amélioré pour les matchs terminés
+        if r == "WON":
+            status_badge = f"<span style='background:#22c55e;color:white;font-weight:800;font-size:0.75rem;white-space:nowrap;padding:2px 8px;border-radius:12px;'>✅ GAGNÉ</span>"
+        elif r == "LOST":
+            status_badge = f"<span style='background:#ef4444;color:white;font-weight:800;font-size:0.75rem;white-space:nowrap;padding:2px 8px;border-radius:12px;'>❌ PERDU</span>"
+        else:
+            status_badge = f"<span style='color:{r_color};font-weight:800;font-size:0.80rem;white-space:nowrap;'>{r_label}</span>"
+
         items_html += (
             f"<div style='border:1px solid {item_border};background:{item_bg};"
             f"border-radius:10px;padding:10px 12px;margin-bottom:6px;'>"
@@ -313,7 +353,7 @@ def _render_ticket(
             f"padding:1px 6px;font-size:0.68rem;font-weight:600;margin-left:6px;'>@{odds_val:.2f}</span>"
             f"</div>"
             f"</div>"
-            f"<span style='color:{r_color};font-weight:800;font-size:0.80rem;white-space:nowrap;'>{r_label}</span>"
+            f"<div>{status_badge}</div>"
             f"</div>"
             f"</div>"
         )
@@ -344,40 +384,76 @@ def _render_ticket(
         unsafe_allow_html=True,
     )
 
-    # ── Boutons de vente (ACTIVE uniquement) ──────────────────────────
+    # ── Système de Vente Classique (ACTIVE uniquement) ─────────────────────
     if show_sell and status == "ACTIVE":
-        offer = compute_ticket_sell_offer(tid)
-        sell_cols = st.columns(2)
-        with sell_cols[0]:
-            if offer["can_sell_full"]:
-                if st.button(
-                    f"💰 Vendre {offer['sell_price_full']} ⭐ (avant début)",
-                    key=f"sell_full_{tid}", use_container_width=True,
-                ):
-                    res = sell_ticket_action(tid, mode="full")
-                    st.success(res["message"]) if res["success"] else st.error(res["message"])
-                    if res["success"]: st.rerun()
-            else:
-                st.markdown(
-                    f"<div style='font-size:0.72rem;color:#4b5563;padding:5px 2px;'>"
-                    f"🔒 {offer['reason_no_full']}</div>",
-                    unsafe_allow_html=True,
-                )
-        with sell_cols[1]:
-            if offer["can_sell_half"]:
-                if st.button(
-                    f"⚡ Cash-out ½ gain ({offer['sell_price_half']} ⭐)",
-                    key=f"sell_half_{tid}", use_container_width=True,
-                ):
-                    res = sell_ticket_action(tid, mode="half")
-                    st.success(res["message"]) if res["success"] else st.error(res["message"])
-                    if res["success"]: st.rerun()
-            else:
-                st.markdown(
-                    f"<div style='font-size:0.72rem;color:#4b5563;padding:5px 2px;'>"
-                    f"🕐 {offer['reason_no_half']}</div>",
-                    unsafe_allow_html=True,
-                )
+        # Vérifier s'il reste des événements non terminés
+        pending_items = [i for i in items if i.get("result") == "PENDING"]
+        
+        if pending_items:
+            # Utiliser uniquement le système de vente classique simple et stable
+            _render_fallback_sell_buttons(tid)
+        else:
+            # Tous les événements sont terminés
+            st.markdown(
+                "<div style='background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);"
+                "border-radius:8px;padding:10px;text-align:center;'>"
+                "<span style='color:#ef4444;font-weight:700;'>🚫 Vente indisponible</span><br>"
+                "<span style='color:#fca5a5;font-size:0.75rem;'>Tous les événements sont terminés</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+    elif show_sell and status != "ACTIVE":
+        # Ticket n'est plus actif
+        status_display = {
+            "WON": "GAGNÉ",
+            "LOST": "PERDU",
+            "SOLD": "VENDU"
+        }.get(status, status)
+        
+        st.markdown(
+            "<div style='background:rgba(107,114,128,0.1);border:1px solid rgba(107,114,128,0.3);"
+            "border-radius:8px;padding:10px;text-align:center;'>"
+            f"<span style='color:#9ca3af;font-weight:700;'>🚫 Vente indisponible</span><br>"
+            f"<span style='color:#d1d5db;font-size:0.75rem;'>Ticket clôturé ({status_display})</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _render_fallback_sell_buttons(ticket_id: int) -> None:
+    """Affiche les boutons de vente classiques en fallback."""
+    offer = compute_ticket_sell_offer(ticket_id)
+    sell_cols = st.columns(2)
+    with sell_cols[0]:
+        if offer["can_sell_full"]:
+            if st.button(
+                f"💰 Vendre {offer['sell_price_full']} ⭐",
+                key=f"sell_full_fallback_{ticket_id}", use_container_width=True,
+            ):
+                res = sell_ticket_action(ticket_id, mode="full")
+                st.success(res["message"]) if res["success"] else st.error(res["message"])
+                if res["success"]: st.rerun()
+        else:
+            st.markdown(
+                f"<div style='font-size:0.72rem;color:#4b5563;padding:5px 2px;'>"
+                f"🔒 {offer['reason_no_full']}</div>",
+                unsafe_allow_html=True,
+            )
+    with sell_cols[1]:
+        if offer["can_sell_half"]:
+            if st.button(
+                f"⚡ Cash-out ½ ({offer['sell_price_half']} ⭐)",
+                key=f"sell_half_fallback_{ticket_id}", use_container_width=True,
+            ):
+                res = sell_ticket_action(ticket_id, mode="half")
+                st.success(res["message"]) if res["success"] else st.error(res["message"])
+                if res["success"]: st.rerun()
+        else:
+            st.markdown(
+                f"<div style='font-size:0.72rem;color:#4b5563;padding:5px 2px;'>"
+                f"🕐 {offer['reason_no_half']}</div>",
+                unsafe_allow_html=True,
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -478,194 +554,15 @@ def _match_label(m: Dict) -> str:
     return f"{mtype}{time_info}  {home} vs {away}{league_short}"
 
 
-def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], api) -> None:
-    st.markdown("### 🎟️ Créer un ticket")
-
-    # Initialiser la liste de sélections en session
-    if "bet_selections" not in st.session_state:
-        st.session_state.bet_selections = []
-
-    # ── Filtre par type de match ──────────────────────────────────────────
-    nb_live   = len(live_matches)
-    nb_future = len(future_matches)
-
-    if nb_live == 0 and nb_future == 0:
-        st.warning("Aucun match disponible actuellement. Revenez plus tard.")
-        return
-
-    # Choisir quelle catégorie afficher
-    filter_options = []
-    if nb_live > 0:
-        filter_options.append(f"🔴 Matchs en direct ({nb_live})")
-    if nb_future > 0:
-        filter_options.append(f"📅 Matchs à venir ({nb_future})")
-    if nb_live > 0 and nb_future > 0:
-        filter_options.insert(0, f"🌐 Tous les matchs ({nb_live + nb_future})")
-
-    st.markdown(
-        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
-        "border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:10px;'>"
-        "<b>Étape 1</b> — Choisissez le type de match</div>",
-        unsafe_allow_html=True,
-    )
-
-    match_filter = st.radio(
-        "Type de match",
-        filter_options,
-        horizontal=True,
-        key="bet_match_filter",
-        label_visibility="collapsed",
-    )
-
-    # Construire la liste filtrée
-    all_matches = []
-    if "Tous" in match_filter or "direct" in match_filter:
-        for m in live_matches:
-            all_matches.append({**m, "_type": "🔴 LIVE"})
-    if "Tous" in match_filter or "venir" in match_filter:
-        for m in future_matches:
-            all_matches.append({**m, "_type": "📅 Futur"})
-
-    # Afficher un compteur informatif
-    if "venir" in match_filter or "Tous" in match_filter:
-        st.markdown(
-            f"<div style='font-size:0.78rem;color:#888;margin-bottom:8px;'>"
-            f"📅 {nb_future} match(s) à venir disponibles · trié(s) par date de début</div>",
-            unsafe_allow_html=True,
-        )
-
-    # ── ÉTAPE 2 : Choisir un match spécifique ────────────────────────────
-    st.markdown(
-        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
-        "border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:10px;'>"
-        "<b>Étape 2</b> — Choisissez un match</div>",
-        unsafe_allow_html=True,
-    )
-
-    if not all_matches:
-        st.info("Aucun match dans cette catégorie.")
-        return
-
-    match_idx = st.selectbox(
-        "Choisir un match",
-        range(len(all_matches)),
-        format_func=lambda i: _match_label(all_matches[i]),
-        key="bet_match_sel",
-        label_visibility="collapsed",
-    )
-    selected_match = all_matches[match_idx]
-
-    # Afficher la fiche du match sélectionné
-    m_home  = selected_match.get("home_team", "?")
-    m_away  = selected_match.get("away_team", "?")
-    m_league = selected_match.get("league", "")
-    m_type  = selected_match.get("_type", "")
-    m_date  = selected_match.get("start_date_display", "")
-    m_time  = selected_match.get("start_time", "")
-    m_venue = selected_match.get("venue", "")
-
-    time_badge = f"📅 {m_date} à {m_time}" if m_date else ""
-    venue_badge = f" · 📍 {m_venue}" if m_venue else ""
-    league_badge = f" · 🏆 {m_league}" if m_league and m_league != "—" else ""
-
-    status_color = "#e02424" if "LIVE" in m_type else "#f59e0b"
-    st.markdown(
-        f"<div style='background:rgba(255,255,255,0.05);border:1px solid {status_color}33;"
-        f"border-left:4px solid {status_color};border-radius:0 10px 10px 0;"
-        f"padding:10px 14px;margin-bottom:12px;'>"
-        f"<div style='font-size:0.75rem;color:#aaa;margin-bottom:4px;'>{m_type}{league_badge}{venue_badge}</div>"
-        f"<div style='font-size:1rem;font-weight:700;'>{m_home} <span style='color:#888;'>vs</span> {m_away}</div>"
-        f"<div style='font-size:0.78rem;color:#f59e0b;margin-top:3px;'>{time_badge}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ── ÉTAPE 3 : Choisir un marché ───────────────────────────────────────
-    st.markdown(
-        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
-        "border-radius:0 8px 8px 0;padding:10px 14px;margin:12px 0;'>"
-        "<b>Étape 3</b> — Choisissez un marché</div>",
-        unsafe_allow_html=True,
-    )
-    market = st.selectbox(
-        "Marché",
-        SUPPORTED_MARKETS,
-        key="bet_market_sel",
-        label_visibility="collapsed",
-    )
-
-    # ── ÉTAPE 4 : Choisir une prédiction ─────────────────────────────────
-    st.markdown(
-        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
-        "border-radius:0 8px 8px 0;padding:10px 14px;margin:12px 0;'>"
-        "<b>Étape 4</b> — Choisissez votre prédiction</div>",
-        unsafe_allow_html=True,
-    )
-    opts = MARKET_OPTIONS.get(market, [])
-    prediction = st.selectbox(
-        "Prédiction",
-        opts if opts else ["—"],
-        key="bet_prediction_sel",
-        label_visibility="collapsed",
-    )
-
-    # ── Alerte temps réel : marché déjà expiré ───────────────────────────
-    if prediction != "—":
-        _exp, _reason = _market_is_expired(selected_match, market, prediction)
-        if _exp:
-            st.markdown(
-                f"<div style='background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.5);"
-                f"border-radius:10px;padding:10px 14px;margin:8px 0;'>"
-                f"<span style='color:#ef4444;font-weight:800;'>🚫 Marché invalide</span><br>"
-                f"<span style='color:#fca5a5;font-size:0.85rem;'>{_reason}</span>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-    # ── Bouton Ajouter ────────────────────────────────────────────────────
-    st.markdown("<div style='margin-top:6px;'>", unsafe_allow_html=True)
-    if st.button("➕ Ajouter cette sélection au ticket", use_container_width=True, type="secondary"):
-        if prediction == "—":
-            st.warning("Prédiction invalide pour ce marché.")
-        else:
-            # Vérifier que l'événement du marché n'a pas déjà eu lieu
-            expired, exp_reason = _market_is_expired(selected_match, market, prediction)
-            if expired:
-                st.error(f"🚫 Sélection refusée — {exp_reason}")
-            # Vérifier doublon dans le ticket en cours
-            elif any(
-                s["fixture_id"] == selected_match.get("fixture_id") and s["market"] == market
-                for s in st.session_state.bet_selections
-            ):
-                st.warning(f"Ce marché ({market}) est déjà dans votre ticket pour ce match.")
-            elif len(st.session_state.bet_selections) >= 8:
-                st.warning("Maximum 8 sélections par ticket.")
-            else:
-                st.session_state.bet_selections.append({
-                    "fixture_id":  selected_match.get("fixture_id"),
-                    "home_team":   selected_match.get("home_team", ""),
-                    "away_team":   selected_match.get("away_team", ""),
-                    "market":      market,
-                    "prediction":  prediction,
-                    "kick_off":    (selected_match.get("kick_off")
-                                   or selected_match.get("start_datetime_local")
-                                   or selected_match.get("fixture_date", "")),
-                    "live_minute": int(selected_match.get("minute", 0) or 0),
-                    "odds":        float(selected_match.get("odds", 1.0) or 1.0),
-                })
-                st.success(f"✓ Ajouté : {selected_match.get('home_team')} vs {selected_match.get('away_team')} — {market} → {prediction}")
-                st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # ── Récapitulatif du ticket en cours ──────────────────────────────────
-    st.markdown("---")
-    nb = len(st.session_state.bet_selections)
+def _render_ticket_recap(api) -> None:
+    """Affiche le récapitulatif du ticket en cours de construction + boutons valider/vider."""
+    nb = len(st.session_state.get("bet_selections", []))
 
     if nb == 0:
         st.markdown(
-            "<div style='text-align:center;color:#888;padding:20px;border:2px dashed rgba(255,255,255,0.1);"
-            "border-radius:12px;font-size:0.88rem;'>Votre ticket est vide.<br>"
-            "Ajoutez au moins 1 sélection pour valider.</div>",
+            "<div style='text-align:center;color:#888;padding:20px;"
+            "border:2px dashed rgba(255,255,255,0.1);border-radius:12px;font-size:0.88rem;'>"
+            "Votre ticket est vide.<br>Ajoutez au moins 1 sélection pour valider.</div>",
             unsafe_allow_html=True,
         )
         return
@@ -676,16 +573,15 @@ def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], 
         unsafe_allow_html=True,
     )
 
-    # Afficher chaque sélection avec date/heure, cote et bouton suppression
     total_odds_preview = 1.0
     for i, sel in enumerate(st.session_state.bet_selections):
-        ko_disp  = _format_kickoff(sel.get("kick_off", ""))
-        lm       = int(sel.get("live_minute", 0) or 0)
-        odds_v   = float(sel.get("odds", 1.0) or 1.0)
+        ko_disp = _format_kickoff(sel.get("kick_off", ""))
+        lm      = int(sel.get("live_minute", 0) or 0)
+        odds_v  = float(sel.get("odds", 1.0) or 1.0)
         total_odds_preview *= max(1.0, odds_v)
 
         if lm > 0:
-            time_info = f"🔴 LIVE {lm}'"
+            time_info  = f"🔴 LIVE {lm}'"
             time_color = "#f87171"
         elif ko_disp:
             time_info  = f"📅 {ko_disp}"
@@ -711,11 +607,11 @@ def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], 
                 unsafe_allow_html=True,
             )
         with cols[1]:
-            if st.button("🗑️", key=f"del_sel_{i}_{sel['fixture_id']}_{market}", help="Retirer"):
+            if st.button("🗑️", key=f"del_sel_{i}_{sel['fixture_id']}", help="Retirer"):
                 st.session_state.bet_selections.pop(i)
                 st.rerun()
 
-    # ── Mise choisie par l'utilisateur ──────────────────────────────────
+    # Mise
     current_pts = get_points_info(DEFAULT_USER_ID)["points"]
     max_mise    = max(5, current_pts)
 
@@ -736,7 +632,6 @@ def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], 
             label_visibility="collapsed",
         )
     else:
-        # Solde == 5 : pas de choix possible, mise fixe à 5
         mise = 5
         st.markdown(
             "<div style='background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);"
@@ -745,43 +640,29 @@ def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], 
             unsafe_allow_html=True,
         )
 
-    # Gain potentiel avec la mise choisie
     reward_table  = compute_reward(mise, nb)
     potential_pts = max(round(mise * total_odds_preview), reward_table["reward_points"])
 
-    # Résumé visuel
     st.markdown(
         f"<div style='background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);"
         f"border-radius:12px;padding:14px 18px;margin-top:6px;'>"
         f"<div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;align-items:center;'>"
-        f"<div>"
-        f"<div style='font-size:0.75rem;color:#9ca3af;'>Sélections</div>"
-        f"<div style='font-size:1.1rem;font-weight:800;color:#fff;'>{nb}</div>"
-        f"</div>"
-        f"<div>"
-        f"<div style='font-size:0.75rem;color:#9ca3af;'>Mise engagée</div>"
-        f"<div style='font-size:1.1rem;font-weight:800;color:#f59e0b;'>{mise} ⭐</div>"
-        f"</div>"
-        f"<div>"
-        f"<div style='font-size:0.75rem;color:#9ca3af;'>Cote combinée</div>"
-        f"<div style='font-size:1.1rem;font-weight:800;color:#00d4ff;'>x{total_odds_preview:.2f}</div>"
-        f"</div>"
-        f"<div>"
-        f"<div style='font-size:0.75rem;color:#9ca3af;'>Gain si victoire</div>"
-        f"<div style='font-size:1.3rem;font-weight:900;color:#22c55e;'>+{potential_pts} ⭐</div>"
-        f"</div>"
-        f"</div>"
-        f"</div>",
+        f"<div><div style='font-size:0.75rem;color:#9ca3af;'>Sélections</div>"
+        f"<div style='font-size:1.1rem;font-weight:800;color:#fff;'>{nb}</div></div>"
+        f"<div><div style='font-size:0.75rem;color:#9ca3af;'>Mise</div>"
+        f"<div style='font-size:1.1rem;font-weight:800;color:#f59e0b;'>{mise} ⭐</div></div>"
+        f"<div><div style='font-size:0.75rem;color:#9ca3af;'>Cote combinée</div>"
+        f"<div style='font-size:1.1rem;font-weight:800;color:#00d4ff;'>x{total_odds_preview:.2f}</div></div>"
+        f"<div><div style='font-size:0.75rem;color:#9ca3af;'>Gain si victoire</div>"
+        f"<div style='font-size:1.3rem;font-weight:900;color:#22c55e;'>+{potential_pts} ⭐</div></div>"
+        f"</div></div>",
         unsafe_allow_html=True,
     )
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
     col_sub, col_clr = st.columns(2)
     with col_sub:
-        if st.button(
-            f"✅ Valider le ticket ({mise} ⭐)",
-            type="primary", use_container_width=True,
-        ):
+        if st.button(f"✅ Valider le ticket ({mise} ⭐)", type="primary", use_container_width=True):
             if current_pts < mise:
                 st.error(f"⭐ Solde insuffisant ({current_pts} ⭐). Minimum requis : {mise} ⭐.")
             else:
@@ -793,6 +674,7 @@ def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], 
                 if result["success"]:
                     st.success(result["message"])
                     st.session_state.bet_selections = []
+                    st.session_state.bet_show_matches = False
                     st.rerun()
                 else:
                     st.error(result["message"])
@@ -800,6 +682,589 @@ def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], 
         if st.button("🗑️ Vider le ticket", use_container_width=True):
             st.session_state.bet_selections = []
             st.rerun()
+
+
+@st.dialog("🎰 Mon Ticket de Paris", width="large")
+def _ticket_modal(api) -> None:
+    """Modal Streamlit natif affichant le ticket complet avec validation."""
+    nb = len(st.session_state.get("bet_selections", []))
+    if nb == 0:
+        st.info("Votre ticket est vide.")
+        return
+    _render_ticket_recap(api)
+
+
+def render_floating_bet_button(api=None) -> None:
+    """
+    Badge flottant compact en bas à droite via components.html (document parent).
+    + vrai st.button caché qui déclenche le dialog.
+    """
+    nb = len(st.session_state.get("bet_selections", []))
+    if nb == 0:
+        return
+
+    # ── Badge injecté dans le document PARENT (pas une iframe) ────────────
+    components.html(
+        f"""
+        <style>
+          @keyframes _pb {{
+            0%   {{ box-shadow: 0 0 0 0 rgba(245,158,11,0.7); transform: scale(1); }}
+            50%  {{ box-shadow: 0 0 0 14px rgba(245,158,11,0); transform: scale(1.06); }}
+            100% {{ box-shadow: 0 0 0 0 rgba(245,158,11,0); transform: scale(1); }}
+          }}
+          #fbet {{
+            position: fixed;
+            bottom: 26px; right: 26px;
+            z-index: 999999;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg,#f59e0b,#d97706);
+            color: #000;
+            border: none;
+            border-radius: 50px;
+            padding: 11px 20px;
+            font-size: 0.92rem;
+            font-weight: 900;
+            cursor: pointer;
+            animation: _pb 1.5s ease-in-out infinite;
+            box-shadow: 0 4px 20px rgba(245,158,11,0.5);
+            white-space: nowrap;
+            font-family: sans-serif;
+          }}
+          #fbet:hover {{ background: linear-gradient(135deg,#fbbf24,#f59e0b); }}
+          #fbet .cnt {{
+            background: #dc2626; color: #fff;
+            border-radius: 50%; width: 22px; height: 22px;
+            display: inline-flex; align-items: center;
+            justify-content: center; font-size: 0.75rem; font-weight: 900;
+          }}
+        </style>
+        <button id="fbet" onclick="
+          var btns = window.parent.document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {{
+            var t = btns[i].innerText || btns[i].textContent;
+            if (t && t.trim() === '__FBET__') {{
+              btns[i].click();
+              break;
+            }}
+          }}
+        ">
+          🎰 Mon Ticket <span class="cnt">{nb}</span>
+        </button>
+        """,
+        height=80,
+        scrolling=False,
+    )
+
+    # Bouton Streamlit caché — texte unique pour le ciblage JS
+    st.markdown(
+        """<style>
+        div[data-testid="stButton"]:has(p) button p { display:inline; }
+        </style>""",
+        unsafe_allow_html=True,
+    )
+    if st.button("__FBET__", key="fbet_trigger_btn"):
+        _ticket_modal(api)
+    # Masquer le bouton via CSS après rendu
+    st.markdown(
+        """<style>
+        div[data-testid="stButton"]:has(button:not([kind])) {
+            visibility: hidden; height: 0; overflow: hidden; margin: 0; padding: 0;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
+
+
+def render_inline_bet_panel(match: Dict, match_type: str = "future") -> None:
+    """
+    Panneau paris inline style 1xbet.
+    S'affiche directement sous la carte du match.
+    match_type: 'live' | 'future'
+    """
+    if "bet_selections" not in st.session_state:
+        st.session_state.bet_selections = []
+
+    fixture_id = match.get("fixture_id") or match.get("id")
+    home       = match.get("home_team", "?")
+    away       = match.get("away_team", "?")
+    status     = match.get("status_short") or match.get("status", "NS")
+    minute     = match.get("minute")
+    home_score = match.get("home_score")
+    away_score = match.get("away_score")
+    kick_off   = (match.get("kick_off") or match.get("start_datetime_local")
+                  or match.get("fixture_date", ""))
+
+    # Couleur panneau selon type
+    panel_color  = "#dc2626" if match_type == "live" else "#f59e0b"
+    panel_border = "rgba(220,38,38,0.3)" if match_type == "live" else "rgba(245,158,11,0.3)"
+
+    # ── Entête panneau ─────────────────────────────────────────────────────
+    st.markdown(
+        f"<div style='background:rgba(255,255,255,0.03);border:1px solid {panel_border};"
+        f"border-top:3px solid {panel_color};border-radius:0 0 12px 12px;"
+        f"padding:14px 16px;margin-bottom:8px;margin-top:-4px;'>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"<div style='font-size:0.78rem;color:#9ca3af;margin-bottom:10px;'>"
+        f"🎰 <b style='color:#fff;'>Parier sur :</b> {home} vs {away}</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Grille de marchés style 1xbet ─────────────────────────────────────
+    # Marchés disponibles selon statut
+    is_live = match_type == "live" or status in ("1H", "2H", "HT", "ET", "LIVE")
+
+    # Marchés rapides (boutons direct)
+    QUICK_MARKETS = {
+        "1X2": [
+            ("1", "Domicile (1)"),
+            ("X", "Nul (X)"),
+            ("2", "Extérieur (2)"),
+        ],
+        "Double Chance": [
+            ("1X", "1X"),
+            ("12", "12"),
+            ("X2", "X2"),
+        ],
+        "BTTS": [
+            ("GG Oui", "GG Oui"),
+            ("GG Non", "GG Non"),
+        ],
+        "Over/Under Buts": [
+            ("O1.5", "Over 1.5"),
+            ("U1.5", "Under 1.5"),
+            ("O2.5", "Over 2.5"),
+            ("U2.5", "Under 2.5"),
+            ("O3.5", "Over 3.5"),
+        ],
+    }
+    if not is_live:
+        QUICK_MARKETS["Corners"] = [("O8.5", "Over 8.5"), ("U8.5", "Under 8.5")]
+        QUICK_MARKETS["Cartons"] = [("O2.5", "Over 2.5"), ("U2.5", "Under 2.5")]
+
+    fid_key = str(fixture_id)
+
+    for market_name, options in QUICK_MARKETS.items():
+        # Vérifier si le marché est compatible
+        m_tmp = {**match, "status_short": status}
+        if not _market_compatible_with(m_tmp, market_name):
+            continue
+
+        st.markdown(
+            f"<div style='font-size:0.70rem;color:#6b7280;font-weight:700;"
+            f"text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 4px;'>"
+            f"{market_name}</div>",
+            unsafe_allow_html=True,
+        )
+
+        btn_cols = st.columns(len(options))
+        for col, (label, pred) in zip(btn_cols, options):
+            with col:
+                # Vérifier si déjà dans le ticket
+                already = any(
+                    s.get("fixture_id") == fixture_id and s.get("market") == market_name
+                    and s.get("prediction") == pred
+                    for s in st.session_state.bet_selections
+                )
+                # Vérifier si marché expiré pour ce pari précis
+                expired, _ = _market_is_expired(
+                    {**match, "_type": "🔴 LIVE" if is_live else "📅 Futur",
+                     "status_short": status, "minute": minute or 0,
+                     "home_score": home_score or 0, "away_score": away_score or 0},
+                    market_name, pred
+                )
+
+                btn_style = "primary" if already else "secondary"
+                btn_label = f"✓ {label}" if already else label
+
+                if expired:
+                    st.markdown(
+                        f"<div style='background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);"
+                        f"border-radius:6px;padding:5px;text-align:center;font-size:0.72rem;"
+                        f"color:#4b5563;'>{label}<br><span style='font-size:0.60rem;'>expiré</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    if st.button(
+                        btn_label,
+                        key=f"ibp_{fid_key}_{market_name}_{label}",
+                        type=btn_style,
+                        use_container_width=True,
+                    ):
+                        if already:
+                            # Désélectionner
+                            st.session_state.bet_selections = [
+                                s for s in st.session_state.bet_selections
+                                if not (s.get("fixture_id") == fixture_id
+                                        and s.get("market") == market_name
+                                        and s.get("prediction") == pred)
+                            ]
+                        elif len(st.session_state.bet_selections) >= 8:
+                            st.warning("Maximum 8 sélections.")
+                        elif any(
+                            s.get("fixture_id") == fixture_id and s.get("market") == market_name
+                            for s in st.session_state.bet_selections
+                        ):
+                            st.warning(f"Marché {market_name} déjà sélectionné pour ce match.")
+                        else:
+                            st.session_state.bet_selections.append({
+                                "fixture_id":  fixture_id,
+                                "home_team":   home,
+                                "away_team":   away,
+                                "market":      market_name,
+                                "prediction":  pred,
+                                "kick_off":    kick_off,
+                                "live_minute": int(minute or 0),
+                                "odds":        1.85,
+                            })
+                        st.rerun()
+
+    # ── Autres marchés via selectbox ──────────────────────────────────────
+    with st.expander("➕ Autres marchés (Mi-temps, Score exact, Corners…)", expanded=False):
+        other_markets = [m for m in SUPPORTED_MARKETS if m not in QUICK_MARKETS]
+        if not is_live:
+            other_markets = SUPPORTED_MARKETS  # tous si futur
+
+        sel_market = st.selectbox(
+            "Marché",
+            [m for m in other_markets if _market_compatible_with({**match, "status_short": status}, m)],
+            key=f"ibp_other_market_{fid_key}",
+            label_visibility="collapsed",
+        )
+        if sel_market:
+            opts = MARKET_OPTIONS.get(sel_market, [])
+            sel_pred = st.selectbox(
+                "Prédiction",
+                opts if opts else ["—"],
+                key=f"ibp_other_pred_{fid_key}",
+                label_visibility="collapsed",
+            )
+            if sel_pred and sel_pred != "—":
+                if st.button(
+                    f"➕ Ajouter {sel_market} → {sel_pred}",
+                    key=f"ibp_other_add_{fid_key}",
+                    use_container_width=True,
+                ):
+                    expired2, reason2 = _market_is_expired(
+                        {**match, "_type": "🔴 LIVE" if is_live else "📅 Futur",
+                         "status_short": status, "minute": minute or 0,
+                         "home_score": home_score or 0, "away_score": away_score or 0},
+                        sel_market, sel_pred
+                    )
+                    if expired2:
+                        st.error(f"🚫 {reason2}")
+                    elif any(s.get("fixture_id") == fixture_id and s.get("market") == sel_market
+                             for s in st.session_state.bet_selections):
+                        st.warning(f"Marché {sel_market} déjà dans le ticket pour ce match.")
+                    elif len(st.session_state.bet_selections) >= 8:
+                        st.warning("Maximum 8 sélections.")
+                    else:
+                        st.session_state.bet_selections.append({
+                            "fixture_id":  fixture_id,
+                            "home_team":   home,
+                            "away_team":   away,
+                            "market":      sel_market,
+                            "prediction":  sel_pred,
+                            "kick_off":    kick_off,
+                            "live_minute": int(minute or 0),
+                            "odds":        1.85,
+                        })
+                        st.rerun()
+
+    # ── Mini récap ticket ──────────────────────────────────────────────────
+    nb = len(st.session_state.bet_selections)
+    if nb > 0:
+        st.markdown(
+            f"<div style='background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.2);"
+            f"border-radius:8px;padding:8px 14px;margin-top:10px;font-size:0.80rem;'>"
+            f"🎟️ <b style='color:#00d4ff;'>{nb}</b> sélection(s) dans votre ticket &nbsp;"
+            f"<span style='color:#6b7280;'>· Allez sur la page <b>Paris</b> pour valider</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _market_compatible_with(match: Dict, market: str) -> bool:
+    """Retourne True si le marché est encore jouable sur ce match."""
+    status = match.get("status_short", "NS")
+    minute = int(match.get("minute", 0) or 0)
+    if status in ("FT", "AET", "PEN", "CANC", "PST", "ABD"):
+        return False
+    if market in ("Corners", "Cartons") and minute >= 80:
+        return False
+    if market == "Mi-temps":
+        # Les prédictions 1ère MT ne sont plus jouables après 45'
+        if minute > 45 and status not in ("NS", "1H"):
+            return False
+    return True
+
+
+def _render_create_ticket(live_matches: List[Dict], future_matches: List[Dict], api) -> None:
+    st.markdown("### 🎟️ Créer un ticket")
+
+    # Initialiser les états de session
+    if "bet_selections" not in st.session_state:
+        st.session_state.bet_selections = []
+    if "bet_market_chosen" not in st.session_state:
+        st.session_state.bet_market_chosen = None
+    if "bet_show_matches" not in st.session_state:
+        st.session_state.bet_show_matches = False
+
+    nb_live   = len(live_matches)
+    nb_future = len(future_matches)
+
+    if nb_live == 0 and nb_future == 0:
+        st.warning("Aucun match disponible actuellement. Revenez plus tard.")
+        return
+
+    # ── ÉTAPE 1 : Choisir le marché ───────────────────────────────────────
+    st.markdown(
+        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
+        "border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:12px;'>"
+        "<b>Étape 1</b> — Choisissez votre marché de pari</div>",
+        unsafe_allow_html=True,
+    )
+
+    market = st.selectbox(
+        "Marché",
+        SUPPORTED_MARKETS,
+        key="bet_market_sel",
+        label_visibility="collapsed",
+    )
+
+    # Décrire le marché sélectionné
+    _MARKET_DESC = {
+        "1X2":             "Victoire domicile · Nul · Victoire extérieur",
+        "Double Chance":   "1X · X2 · 12 — deux résultats couverts",
+        "BTTS":            "Les deux équipes marquent (GG Oui / GG Non)",
+        "Over/Under Buts": "Nombre total de buts dans le match",
+        "Prochain But":    "Quelle équipe marque le prochain but",
+        "Mi-temps":        "Résultat ou buts sur une mi-temps spécifique",
+        "Corners":         "Nombre total de corners dans le match",
+        "Cartons":         "Nombre total de cartons dans le match",
+        "Score Exact":     "Score final exact du match",
+    }
+    desc = _MARKET_DESC.get(market, "")
+    if desc:
+        st.markdown(
+            f"<div style='font-size:0.78rem;color:#9ca3af;margin-bottom:12px;"
+            f"padding:6px 12px;background:rgba(255,255,255,0.03);border-radius:8px;'>"
+            f"ℹ️ {desc}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Bouton — Voir les matchs disponibles ─────────────────────────────
+    if st.button(
+        f"� Voir les matchs disponibles pour « {market} »",
+        type="primary",
+        use_container_width=True,
+        key="btn_show_matches",
+    ):
+        st.session_state.bet_market_chosen = market
+        st.session_state.bet_show_matches  = True
+        st.rerun()
+
+    # Réinitialiser si le marché change
+    if st.session_state.bet_market_chosen != market:
+        st.session_state.bet_show_matches = False
+
+    if not st.session_state.bet_show_matches:
+        # Invitation visuelle
+        st.markdown(
+            "<div style='text-align:center;padding:28px;border:2px dashed rgba(255,255,255,0.08);"
+            "border-radius:14px;color:#6b7280;margin-top:8px;'>"
+            "Choisissez un marché ci-dessus, puis cliquez sur le bouton<br>"
+            "pour découvrir les matchs disponibles.</div>",
+            unsafe_allow_html=True,
+        )
+        # Afficher quand même le récapitulatif du ticket en cours s'il y a des sélections
+        _render_ticket_recap(api)
+        return
+
+    # ── ÉTAPE 2 : Type de match (Live / Futur) ────────────────────────────
+    st.markdown(
+        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
+        "border-radius:0 8px 8px 0;padding:10px 14px;margin:14px 0 10px;'>"
+        "<b>Étape 2</b> — Choisissez le type de match</div>",
+        unsafe_allow_html=True,
+    )
+
+    filter_options = []
+    if nb_live > 0 and nb_future > 0:
+        filter_options.append(f"🌐 Tous ({nb_live + nb_future})")
+    if nb_live > 0:
+        filter_options.append(f"🔴 En direct ({nb_live})")
+    if nb_future > 0:
+        filter_options.append(f"📅 À venir ({nb_future})")
+
+    match_filter = st.radio(
+        "Type",
+        filter_options,
+        horizontal=True,
+        key="bet_match_filter",
+        label_visibility="collapsed",
+    )
+
+    # Construire le pool de matchs selon le filtre
+    all_matches = []
+    if "direct" in match_filter or "Tous" in match_filter:
+        for m in live_matches:
+            all_matches.append({**m, "_type": "🔴 LIVE"})
+    if "venir" in match_filter or "Tous" in match_filter:
+        for m in future_matches:
+            all_matches.append({**m, "_type": "📅 Futur"})
+
+    # Filtrer les matchs compatibles avec le marché choisi
+    compatible = [m for m in all_matches if _market_compatible_with(m, market)]
+    incompatible_count = len(all_matches) - len(compatible)
+
+    if not compatible:
+        st.warning(f"Aucun match disponible pour le marché « {market} » dans cette catégorie.")
+        if incompatible_count:
+            st.caption(f"{incompatible_count} match(s) exclu(s) car terminé(s) ou marché expiré.")
+        _render_ticket_recap(api)
+        return
+
+    # Résumé filtrage
+    info_parts = [f"<b style='color:#00d4ff;'>{len(compatible)}</b> match(s) compatibles"]
+    if incompatible_count:
+        info_parts.append(f"<span style='color:#6b7280;'>{incompatible_count} exclu(s)</span>")
+    st.markdown(
+        f"<div style='font-size:0.78rem;color:#9ca3af;margin-bottom:10px;'>"
+        + " · ".join(info_parts) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── ÉTAPE 3 : Choisir un match parmi les compatibles ──────────────────
+    st.markdown(
+        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
+        "border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:10px;'>"
+        "<b>Étape 3</b> — Choisissez un match</div>",
+        unsafe_allow_html=True,
+    )
+
+    match_idx = st.selectbox(
+        "Choisir un match",
+        range(len(compatible)),
+        format_func=lambda i: _match_label(compatible[i]),
+        key="bet_match_sel",
+        label_visibility="collapsed",
+    )
+    selected_match = compatible[match_idx]
+
+    # Fiche visuelle du match sélectionné
+    m_home   = selected_match.get("home_team", "?")
+    m_away   = selected_match.get("away_team", "?")
+    m_league = selected_match.get("league", "")
+    m_type   = selected_match.get("_type", "")
+    m_date   = selected_match.get("start_date_display", "")
+    m_time   = selected_match.get("start_time", "")
+    m_minute = selected_match.get("minute")
+    m_hscore = selected_match.get("home_score")
+    m_ascore = selected_match.get("away_score")
+
+    status_color = "#e02424" if "LIVE" in m_type else "#f59e0b"
+    league_badge = f" · 🏆 {m_league}" if m_league and m_league != "—" else ""
+
+    if "LIVE" in m_type and m_minute is not None and m_hscore is not None:
+        time_info = (
+            f"<span style='background:#dc2626;color:#fff;border-radius:4px;"
+            f"padding:2px 8px;font-size:0.72rem;font-weight:900;'>● LIVE {m_minute}'</span>"
+            f"&nbsp;<span style='font-weight:800;font-size:1rem;color:#fff;'>"
+            f"{m_hscore} – {m_ascore}</span>"
+        )
+    elif m_date or m_time:
+        time_info = f"<span style='color:#f59e0b;font-size:0.78rem;'>📅 {m_date} à {m_time}</span>"
+    else:
+        time_info = ""
+
+    st.markdown(
+        f"<div style='background:rgba(255,255,255,0.05);border:1px solid {status_color}44;"
+        f"border-left:4px solid {status_color};border-radius:0 12px 12px 0;"
+        f"padding:12px 16px;margin-bottom:14px;'>"
+        f"<div style='font-size:0.72rem;color:#9ca3af;margin-bottom:4px;'>"
+        f"{m_type}{league_badge}</div>"
+        f"<div style='font-size:1.05rem;font-weight:800;color:#f1f5f9;margin-bottom:6px;'>"
+        f"{m_home} <span style='color:#4b5563;'>vs</span> {m_away}</div>"
+        f"{time_info}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── ÉTAPE 4 : Choisir la prédiction ───────────────────────────────────
+    st.markdown(
+        "<div style='background:rgba(0,212,255,0.07);border-left:3px solid #00d4ff;"
+        "border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:10px;'>"
+        "<b>Étape 4</b> — Choisissez votre prédiction</div>",
+        unsafe_allow_html=True,
+    )
+
+    opts = MARKET_OPTIONS.get(market, [])
+    prediction = st.selectbox(
+        "Prédiction",
+        opts if opts else ["—"],
+        key="bet_prediction_sel",
+        label_visibility="collapsed",
+    )
+
+    # Alerte : marché déjà expiré pour ce match en live
+    if prediction != "—":
+        _exp, _reason = _market_is_expired(selected_match, market, prediction)
+        if _exp:
+            st.markdown(
+                f"<div style='background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.45);"
+                f"border-radius:10px;padding:10px 14px;margin:8px 0;'>"
+                f"<b style='color:#ef4444;'>🚫 Marché invalide</b><br>"
+                f"<span style='color:#fca5a5;font-size:0.83rem;'>{_reason}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+    # ── Bouton Ajouter au ticket ──────────────────────────────────────────
+    st.markdown("<div style='margin-top:10px;'>", unsafe_allow_html=True)
+    if st.button("➕ Ajouter cette sélection au ticket", use_container_width=True, type="secondary"):
+        if prediction == "—":
+            st.warning("Prédiction invalide pour ce marché.")
+        else:
+            expired, exp_reason = _market_is_expired(selected_match, market, prediction)
+            if expired:
+                st.error(f"🚫 Sélection refusée — {exp_reason}")
+            elif any(
+                s["fixture_id"] == selected_match.get("fixture_id") and s["market"] == market
+                for s in st.session_state.bet_selections
+            ):
+                st.warning(f"Ce marché ({market}) est déjà dans votre ticket pour ce match.")
+            elif len(st.session_state.bet_selections) >= 8:
+                st.warning("Maximum 8 sélections par ticket.")
+            else:
+                st.session_state.bet_selections.append({
+                    "fixture_id":  selected_match.get("fixture_id"),
+                    "home_team":   selected_match.get("home_team", ""),
+                    "away_team":   selected_match.get("away_team", ""),
+                    "market":      market,
+                    "prediction":  prediction,
+                    "kick_off":    (selected_match.get("kick_off")
+                                   or selected_match.get("start_datetime_local")
+                                   or selected_match.get("fixture_date", "")),
+                    "live_minute": int(selected_match.get("minute", 0) or 0),
+                    "odds":        float(selected_match.get("odds", 1.0) or 1.0),
+                })
+                st.success(
+                    f"✓ Ajouté : {selected_match.get('home_team')} vs "
+                    f"{selected_match.get('away_team')} — {market} → {prediction}"
+                )
+                st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Récapitulatif du ticket en cours ──────────────────────────────────
+    st.markdown("---")
+    _render_ticket_recap(api)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -813,6 +1278,10 @@ def render_betting_page(
 ) -> None:
     """Rendu complet de la page Paris."""
     init_db()
+    
+    # Stocker l'API en session pour le Smart Cashout
+    st.session_state.current_api = api
+    
     live_matches   = live_matches   or []
     future_matches = future_matches or []
 
@@ -863,6 +1332,25 @@ def render_betting_page(
                 st.info(r.get("message", ""))
         if any(r.get("status") in ("WON", "LOST") for r in results):
             st.rerun()
+
+
+
+    # ── Ouverture directe ticket si venu du badge flottant ──────────────────
+    open_ticket_direct = st.session_state.pop("paris_open_ticket", False)
+    if open_ticket_direct and st.session_state.get("bet_selections"):
+        nb_sel = len(st.session_state["bet_selections"])
+        st.markdown(
+            f"<div style='background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);"
+            f"border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;"
+            f"align-items:center;gap:12px;'>"
+            f"<span style='font-size:1.5rem;'>🎰</span>"
+            f"<div><div style='font-weight:800;color:#f59e0b;'>Votre sélection — {nb_sel} événement(s)</div>"
+            f"<div style='font-size:0.82rem;color:#9ca3af;'>Choisissez votre mise et validez votre ticket ci-dessous</div>"
+            f"</div></div>",
+            unsafe_allow_html=True,
+        )
+        _render_ticket_recap(api)
+        st.markdown("---")
 
     # ── Tabs ────────────────────────────────────────────────────────────────
     tab_labels = ["🎟️ Créer Ticket", "🟡 Actifs", "✅ Terminés", "📜 Historique"]
@@ -951,7 +1439,7 @@ def render_betting_page(
                         "away_score": lm.get("away_score"),
                         "kick_off":   lm.get("kick_off", ""),
                     }
-            st.caption(f"📋 {len(tickets_active)} ticket(s) en cours · {len(live_ctx)} match(s) live suivis")
+            st.caption(f"� {len(tickets_active)} ticket(s) en cours · {len(live_ctx)} match(s) live suivis")
             for t in tickets_active:
                 _render_ticket(t, live_ctx=live_ctx)
 
@@ -1024,27 +1512,66 @@ def render_betting_page(
                 f"</div>"
             )
             st.markdown(stats_html, unsafe_allow_html=True)
+            
+            # Bouton pour supprimer tous les tickets terminés
+            finished_tickets = [t for t in all_tickets if t["ticket_status"] in ["WON", "LOST", "SOLD"]]
+            if finished_tickets:
+                st.markdown("---")
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    if st.button("🗑️ Supprimer tous les tickets terminés", use_container_width=True):
+                        if st.checkbox("⚠️ Confirmer la suppression de tous les tickets terminés ?", key="confirm_delete_all"):
+                            deleted_count = 0
+                            for ticket in finished_tickets:
+                                if delete_ticket(ticket['ticket_id'], DEFAULT_USER_ID):
+                                    deleted_count += 1
+                            st.success(f"✅ {deleted_count} ticket(s) supprimé(s) avec succès")
+                            st.rerun()
 
-            # Table historique
-            rows_html = "".join(
-                f"<tr style='border-bottom:1px solid rgba(255,255,255,0.06);'>"
-                f"<td style='padding:8px;font-weight:600;'>#{t['ticket_id']}</td>"
-                f"<td style='padding:8px;font-size:0.78rem;color:#aaa;'>{t.get('created_at','')[:10]}</td>"
-                f"<td style='padding:8px;'>{STATUS_CONFIG.get(t['ticket_status'],('—','#888',''))[0]}</td>"
-                f"<td style='padding:8px;'>{t['points_used']} ⭐</td>"
-                f"<td style='padding:8px;color:#22c55e;'>"
-                f"{'+' + str(t['reward_points']) + ' ⭐' if t['reward_points'] > 0 else '—'}</td>"
-                f"</tr>"
-                for t in all_tickets
-            )
-            st.markdown(
-                f"<div style='overflow-x:auto;'><table style='width:100%;border-collapse:collapse;font-size:0.85rem;'>"
-                f"<thead><tr style='border-bottom:2px solid rgba(255,255,255,0.15);'>"
-                f"<th style='padding:8px;text-align:left;'>Ticket</th>"
-                f"<th style='padding:8px;text-align:left;'>Date</th>"
-                f"<th style='padding:8px;text-align:left;'>Statut</th>"
-                f"<th style='padding:8px;text-align:left;'>Coût</th>"
-                f"<th style='padding:8px;text-align:left;'>Gain</th>"
-                f"</tr></thead><tbody>{rows_html}</tbody></table></div>",
-                unsafe_allow_html=True,
-            )
+            # Afficher chaque ticket avec bouton de suppression
+            for ticket in all_tickets:
+                ticket_id = ticket['ticket_id']
+                status = ticket['ticket_status']
+                created_date = ticket.get('created_at', '')[:10]
+                
+                # Déterminer la couleur du statut
+                status_colors = {
+                    "WON": ("🟢 GAGNÉ", "#22c55e"),
+                    "LOST": ("🔴 PERDU", "#ef4444"),
+                    "ACTIVE": ("🟡 ACTIF", "#f59e0b"),
+                    "SOLD": ("💰 VENDU", "#a78bfa")
+                }
+                status_text, status_color = status_colors.get(status, ("❓ " + status, "#6b7280"))
+                
+                # Afficher la carte du ticket
+                col1, col2, col3, col4, col5, col6 = st.columns([1, 2, 2, 1, 1, 1])
+                
+                with col1:
+                    st.markdown(f"**#{ticket_id}**")
+                    
+                with col2:
+                    st.markdown(f"*{created_date}*")
+                    
+                with col3:
+                    st.markdown(f"<span style='color:{status_color};font-weight:600;'>{status_text}</span>", unsafe_allow_html=True)
+                    
+                with col4:
+                    st.markdown(f"{ticket['points_used']} ⭐")
+                    
+                with col5:
+                    if ticket['reward_points'] > 0:
+                        st.markdown(f"+{ticket['reward_points']} ⭐")
+                    else:
+                        st.markdown("—")
+                        
+                with col6:
+                    # Bouton de suppression (uniquement pour les tickets terminés)
+                    if status in ["WON", "LOST", "SOLD"]:
+                        if st.button("🗑️", key=f"delete_{ticket_id}", help="Supprimer ce ticket"):
+                            if delete_ticket(ticket_id, DEFAULT_USER_ID):
+                                st.success(f"✅ Ticket #{ticket_id} supprimé")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Erreur lors de la suppression du ticket #{ticket_id}")
+                    else:
+                        st.markdown("*—*")

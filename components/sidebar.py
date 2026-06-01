@@ -38,13 +38,14 @@ def render_sidebar():
         active_page = st.session_state.get("active_page", "live")
         
         # Navigation buttons with dynamic styling based on active state
-        live_type     = "primary" if active_page == "live"     else "secondary"
-        future_type   = "primary" if active_page == "future"  else "secondary"
-        paris_type    = "primary" if active_page == "paris"   else "secondary"
-        over25_type   = "primary" if active_page == "over25"   else "secondary"
-        under25_type  = "primary" if active_page == "under25"  else "secondary"
-        daily_type    = "primary" if active_page == "daily"    else "secondary"
-        history_type  = "primary" if active_page == "history"  else "secondary"
+        live_type       = "primary" if active_page == "live"       else "secondary"
+        future_type     = "primary" if active_page == "future"    else "secondary"
+        paris_type      = "primary" if active_page == "paris"     else "secondary"
+        over25_type     = "primary" if active_page == "over25"    else "secondary"
+        under25_type    = "primary" if active_page == "under25"   else "secondary"
+        daily_type      = "primary" if active_page == "daily"     else "secondary"
+        history_type    = "primary" if active_page == "history"   else "secondary"
+        victories_type  = "primary" if active_page == "victories" else "secondary"
 
         if active_page == "analysis":
             st.markdown(
@@ -93,6 +94,15 @@ def render_sidebar():
             on_click=_set_page,
             args=("paris",),
             type=paris_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "🏆 TOP VICTOIRES IA",
+            key="victories_button",
+            on_click=_set_page,
+            args=("victories",),
+            type=victories_type,
             use_container_width=True,
         )
 
