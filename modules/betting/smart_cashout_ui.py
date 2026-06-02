@@ -316,7 +316,15 @@ def render_auto_refresh_cashout(ticket_id: int, engine, refresh_interval: int = 
 def render_cashout_button(ticket_id: int, cashout_data: Dict[str, Any]) -> bool:
     """Affiche le bouton de vente intelligent avec bouton Streamlit standard.
     Retourne True seulement si une vente confirmée a eu lieu."""
-    if not cashout_data.get("available"):
+    if not cashout_data.get("available") or not cashout_data.get("sale_allowed", True):
+        reason = cashout_data.get("reason", "Vente bloquée : prédiction non favorable.")
+        st.markdown(f"""
+        <div style='background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);
+                    border-radius:10px;padding:12px;text-align:center;margin-top:10px;'>
+            <div style='color:#ef4444;font-weight:800;'>🚫 Vente bloquée</div>
+            <div style='color:#fca5a5;font-size:0.82rem;margin-top:3px;'>{reason}</div>
+        </div>
+        """, unsafe_allow_html=True)
         return False
     
     rec_type = cashout_data.get("recommendation_type", "NEUTRAL")
@@ -345,8 +353,24 @@ def render_cashout_button(ticket_id: int, cashout_data: Dict[str, Any]) -> bool:
         if st.session_state.get(f"confirm_sell_{ticket_id}", False):
             # Effectuer la vente
             try:
-                from modules.betting.ticket_actions import sell_ticket_action
-                res = sell_ticket_action(ticket_id, mode="full")
+                from modules.betting.points_manager import credit_points
+                from modules.betting.ticket_storage import DEFAULT_USER_ID, get_ticket, get_ticket_items, sell_ticket
+
+                ticket = get_ticket(ticket_id)
+                items = get_ticket_items(ticket_id)
+                nb_won = sum(1 for item in items if item.get("result") == "WON")
+                nb_lost = sum(1 for item in items if item.get("result") == "LOST")
+                if not ticket or ticket.get("ticket_status") != "ACTIVE":
+                    res = {"success": False, "message": "Ticket non actif."}
+                elif nb_lost > 0:
+                    res = {"success": False, "message": "Vente bloquée : une prédiction du ticket est perdue."}
+                elif nb_won <= 0:
+                    res = {"success": False, "message": "Vente bloquée : aucune prédiction favorable validée pour le moment."}
+                else:
+                    sell_price = max(1, int(offer))
+                    sell_ticket(ticket_id, sell_price)
+                    credit_points(DEFAULT_USER_ID, sell_price)
+                    res = {"success": True, "message": f"Ticket #{ticket_id} vendu pour {sell_price} ⭐."}
                 
                 if res.get("success"):
                     st.success(f"✅ Ticket #{ticket_id} vendu pour {offer} ⭐ !")

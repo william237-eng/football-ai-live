@@ -39,10 +39,10 @@ class SmartCashoutEngine:
                 logger.warning(f"Ticket #{ticket_id} introuvable pour user #{user_id}")
                 return self._empty_response("Ticket introuvable")
                 
-            # Vérifier si le cashout est disponible
-            if not self._is_cashout_available(ticket_data):
-                logger.info(f"Cashout indisponible pour ticket #{ticket_id} - statut: {ticket_data['status']}")
-                return self._empty_response("Cashout indisponible")
+            block_reason = self._cashout_block_reason(ticket_data)
+            if block_reason:
+                logger.info(f"Cashout indisponible pour ticket #{ticket_id}: {block_reason}")
+                return self._empty_response(block_reason)
                 
             # Calculer les facteurs avec protection
             try:
@@ -97,7 +97,8 @@ class SmartCashoutEngine:
                 "live_analysis": factors["live_analysis"],
                 "calculated_at": datetime.now(timezone.utc).isoformat(),
                 "next_update": (datetime.now(timezone.utc).timestamp() + 15),
-                "fallback_used": factors.get("fallback_used", False)
+                "fallback_used": factors.get("fallback_used", False),
+                "sale_allowed": True
             }
             
         except Exception as e:
@@ -144,23 +145,26 @@ class SmartCashoutEngine:
             "total_odds": total_odds
         }
     
+    def _cashout_block_reason(self, ticket_data: Dict[str, Any]) -> str:
+        status = ticket_data["status"]
+
+        if status in ["LOST", "SOLD"]:
+            return "Vente bloquée : ticket déjà perdu ou vendu."
+
+        if ticket_data["pending_events"] == 0:
+            return "Vente bloquée : tous les événements sont terminés."
+
+        if ticket_data["lost_events"] > 0:
+            return "Vente bloquée : une prédiction du ticket est perdue."
+
+        if ticket_data["won_events"] <= 0:
+            return "Vente bloquée : aucune prédiction favorable validée pour le moment."
+
+        return ""
+
     def _is_cashout_available(self, ticket_data: Dict[str, Any]) -> bool:
         """Vérifie si le cashout est disponible pour ce ticket."""
-        status = ticket_data["status"]
-        
-        # Cashout indisponible si ticket perdu ou terminé
-        if status in ["LOST", "SOLD"]:
-            return False
-            
-        # Cashout indisponible si tous les événements sont terminés
-        if ticket_data["pending_events"] == 0:
-            return False
-            
-        # Cashout indisponible si déjà des pertes
-        if ticket_data["lost_events"] > 0:
-            return False
-            
-        return True
+        return not self._cashout_block_reason(ticket_data)
     
     def _calculate_factors(self, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
         """Calcule tous les facteurs pour le Smart Cashout."""
@@ -753,6 +757,7 @@ class SmartCashoutEngine:
         """Retourne une réponse vide pour cashout indisponible."""
         return {
             "available": False,
+            "sale_allowed": False,
             "reason": reason,
             "calculated_at": datetime.now(timezone.utc).isoformat()
         }
@@ -853,11 +858,19 @@ class SmartCashoutEngine:
         Retourne une réponse minimale mais fonctionnelle.
         """
         try:
-            from modules.betting.ticket_storage import get_ticket
+            from modules.betting.ticket_storage import get_ticket, get_ticket_items
             ticket = get_ticket(ticket_id)
             
             if not ticket:
                 return self._empty_response("Ticket introuvable")
+
+            items = get_ticket_items(ticket_id)
+            nb_won = sum(1 for item in items if item.get("result") == "WON")
+            nb_lost = sum(1 for item in items if item.get("result") == "LOST")
+            if nb_lost > 0:
+                return self._empty_response("Vente bloquée : une prédiction du ticket est perdue.")
+            if nb_won <= 0:
+                return self._empty_response("Vente bloquée : aucune prédiction favorable validée pour le moment.")
             
             stake = ticket.get("points_used", 10)
             cashout = round(stake * 1.6)  # 160% de la mise pour un bon bénéfice
@@ -883,7 +896,8 @@ class SmartCashoutEngine:
                 "calculated_at": datetime.now(timezone.utc).isoformat(),
                 "next_update": (datetime.now(timezone.utc).timestamp() + 15),
                 "fallback_used": True,
-                "emergency_fallback": True
+                "emergency_fallback": True,
+                "sale_allowed": True
             }
         except Exception as e:
             logger.critical(f"ERREUR FATALE fallback d'urgence ticket #{ticket_id}: {e}")
