@@ -271,10 +271,10 @@ def _fetch_fixture_robust(
 ) -> Optional[Dict]:
     """
     Tente de récupérer un fixture par ID.
-    Fallbacks :
-      1. get_fixture_detail direct
-      2. Si kick_off dépassé de +3h → fixture synthétique FT
-      3. Si ticket créé hier ou avant → fixture synthétique FT
+    - 1. get_fixture_detail direct
+
+    IMPORTANT: Ne jamais créer de fixtures synthétiques ni inventer d'état.
+    Si l'API ne renvoie pas le fixture, retourner None pour indiquer "données manquantes".
     """
     from datetime import datetime, timezone, timedelta
 
@@ -291,41 +291,7 @@ def _fetch_fixture_robust(
     except Exception:
         pass
 
-    now = datetime.now(timezone.utc)
-
-    # 2. Fallback kick_off : si dépassé de +3h
-    ref_iso = kick_off_iso or ticket_created_at
-    if ref_iso:
-        try:
-            ref_dt = datetime.fromisoformat(ref_iso.replace("Z", "+00:00"))
-            if ref_dt.tzinfo is None:
-                ref_dt = ref_dt.replace(tzinfo=timezone.utc)
-            if now - ref_dt > timedelta(hours=3):
-                return {
-                    "fixture": {"id": fid, "status": {"short": "FT", "long": "Match Finished", "elapsed": 90}},
-                    "goals":   {"home": None, "away": None},
-                    "score":   {},
-                    "_synthetic": True,
-                }
-        except Exception:
-            pass
-
-    # 3. Fallback ultime : si le ticket date de plus d'un jour entier
-    if ticket_created_at:
-        try:
-            created_dt = datetime.fromisoformat(ticket_created_at.replace("Z", "+00:00"))
-            if created_dt.tzinfo is None:
-                created_dt = created_dt.replace(tzinfo=timezone.utc)
-            if now - created_dt > timedelta(hours=24):
-                return {
-                    "fixture": {"id": fid, "status": {"short": "FT", "long": "Match Finished", "elapsed": 90}},
-                    "goals":   {"home": None, "away": None},
-                    "score":   {},
-                    "_synthetic": True,
-                }
-        except Exception:
-            pass
-
+    # Ne pas fabriquer d'information. Si la récupération échoue, renvoyer None.
     return None
 
 

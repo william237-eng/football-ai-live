@@ -14,6 +14,7 @@ from modules.top_under25_live.under25_monitor import (
     refresh_live_matches,
     register_prediction,
     get_prediction_stats,
+    get_predictions,
     REF_ODD,
 )
 
@@ -379,6 +380,196 @@ def _render_stats_block() -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
+def _render_prediction_tables() -> None:
+    """Affiche deux tableaux : prédictions émises aujourd'hui et sur 7 jours.
+    Les lignes sont colorées : vert = gain (win), rouge = perte (loss), neutre = pending.
+    """
+    try:
+        today_preds = get_predictions(days=1)
+        week_preds = get_predictions(days=7)
+    except Exception:
+        st.caption("Impossible de récupérer les prédictions.")
+        return
+
+    def _table_html(preds):
+        if not preds:
+            return "<div style='text-align:center;color:#888;padding:10px;'>Aucune prédiction</div>"
+        rows = []
+        for p in preds:
+            status = p.get("status", "pending")
+            if status == "win":
+                bg = "rgba(34,197,94,0.10)"
+                color = "#0f5132"
+            elif status == "loss":
+                bg = "rgba(239,68,68,0.08)"
+                color = "#5f2120"
+            else:
+                bg = "rgba(255,255,255,0.02)"
+                color = "#666"
+            time = p.get("timestamp_prediction", "")
+            teams = f"{p.get('home_name','—')} — {p.get('away_name','—')}"
+            prob = f"{round(p.get('probability', 0)*100, 1)}%" if isinstance(p.get('probability', 0), float) and p.get('probability', 0) <= 1 else f"{p.get('probability', p.get('probability', 0))}"
+            # normalize probability display
+            try:
+                prob_val = float(p.get('probability', 0))
+                if prob_val <= 1:
+                    prob = f"{round(prob_val*100,1)}%"
+            except Exception:
+                pass
+            status_lbl = "GAGNÉ" if status == "win" else "PERDU" if status == "loss" else "EN ATTENTE"
+            rows.append(
+                f"<tr style='background:{bg};color:{color};font-weight:700;'>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.03);'>{time}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.03);'>{teams}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:center;'>{prob}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:center;'>{status_lbl}</td>"
+                f"</tr>"
+            )
+        body = "".join(rows)
+        return (
+            f"<table style='width:100%;border-collapse:collapse;font-size:0.85rem;'>"
+            f"<thead><tr style='color:#aaa;font-weight:800;background:rgba(255,255,255,0.02);'>"
+            f"<th style='text-align:left;padding:6px 8px;'>Prédit le</th>"
+            f"<th style='text-align:left;padding:6px 8px;'>Match</th>"
+            f"<th style='padding:6px 8px;text-align:center;'>Prob.</th>"
+            f"<th style='padding:6px 8px;text-align:center;'>Statut</th>"
+            f"</tr></thead><tbody>{body}</tbody></table>"
+        )
+
+    html = (
+        "<div style='display:flex;gap:12px;margin-bottom:12px;'>"
+        f"<div style='flex:1;background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;'>"
+        f"<div style='font-weight:800;color:#a855f7;margin-bottom:8px;'>Aujourd'hui</div>" + _table_html(today_preds) + "</div>"
+        f"<div style='flex:1;background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;'>"
+        f"<div style='font-weight:800;color:#a855f7;margin-bottom:8px;'>7 jours</div>" + _table_html(week_preds) + "</div>"
+        "</div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _render_detailed_tables() -> None:
+    """Affiche deux tableaux détaillés : Prédictions du jour et Statistiques cette semaine
+
+    Mise en forme identique au module TOP +2.5 BUTS.
+    """
+    try:
+        from modules.top_under25_live.under25_monitor import get_predictions
+        from datetime import datetime, timezone, timedelta
+    except Exception:
+        st.caption("Impossible de récupérer les prédictions.")
+        return
+
+    all_today = get_predictions(days=1)
+    all_week = get_predictions(days=7)
+
+    def _row_html(p: dict) -> str:
+        status = p.get("status", "pending")
+        if status == "win":
+            row_bg = "rgba(34,197,94,0.06)"
+            left = "#22c55e"
+            status_label = "WON"
+        elif status == "loss":
+            row_bg = "rgba(239,68,68,0.06)"
+            left = "#ef4444"
+            status_label = "LOST"
+        else:
+            row_bg = "rgba(255,255,255,0.02)"
+            left = "#9ca3af"
+            status_label = "PENDING"
+
+        ts = (p.get("timestamp_prediction") or "")[:16].replace("T", " ")
+        home = p.get("home_name", "?")
+        away = p.get("away_name", "?")
+        pred = p.get("predicted_market") or "UNDER 2.5"
+        return (
+            f"<tr style='background:{row_bg};'>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);color:{left};font-weight:800;'>{status_label}</td>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{ts}</td>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{home} vs {away}</td>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{pred}</td>"
+            f"</tr>"
+        )
+
+    # Tableau aujourd'hui
+    st.markdown("<div style='margin-top:14px;font-weight:700;'>Prédictions du jour</div>", unsafe_allow_html=True)
+    if all_today:
+        rows = "".join(_row_html(p) for p in all_today)
+        table_html = (
+            "<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
+            "<thead><tr>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+            "</tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
+    else:
+        st.caption("Aucune prédiction émise aujourd'hui.")
+
+    # Tableau 7 jours
+    st.markdown("<div style='margin-top:18px;font-weight:700;'>Statistiques cette semaine</div>", unsafe_allow_html=True)
+    if all_week:
+        rows = "".join(_row_html(p) for p in all_week)
+        table_html = (
+            "<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
+            "<thead><tr>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+            "</tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
+    else:
+        st.caption("Aucune prédiction émise ces 7 derniers jours.")
+
+    # Historique (dernier 50)
+    try:
+        history = get_predictions(days=3650)[:50]
+    except Exception:
+        history = []
+    with st.expander("📜 Historique des prédictions (dernier 50)", expanded=False):
+        if not history:
+            st.caption("Aucune prédiction enregistrée.")
+        else:
+            for p in history:
+                status = p.get("status", "pending")
+                if status == "win":
+                    s_color = "#22c55e"
+                    s_label = "✅ GAGNÉ"
+                elif status == "loss":
+                    s_color = "#ef4444"
+                    s_label = "❌ PERDU"
+                else:
+                    s_color = "#f59e0b"
+                    s_label = "⏳ Attente"
+
+                ts = (p.get("timestamp_prediction") or "")[:16].replace("T", " ")
+                home = p.get("home_name", "?")
+                away = p.get("away_name", "?")
+                pred_lbl = p.get("predicted_market", "UNDER 2.5")
+                prob = p.get("probability", 0.0)
+                prob_display = f"{round(prob*100,1)}%" if isinstance(prob, float) and prob <= 1 else str(prob)
+                row = (
+                    f"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;"
+                    f"padding:10px 14px;margin-bottom:6px;background:rgba(255,255,255,0.03);"
+                    f"border:1px solid rgba(255,255,255,0.07);border-radius:10px;'>"
+                    f"<span style='font-size:0.75rem;color:{s_color};font-weight:800;min-width:72px;'>{s_label}</span>"
+                    f"<div style='flex:1;min-width:0;'>"
+                    f"<div style='font-size:0.82rem;font-weight:700;color:#e2e8f0;'>{home} vs {away}</div>"
+                    f"<div style='font-size:0.70rem;color:#6b7280;'>{pred_lbl}</div>"
+                    f"</div>"
+                    f"<div style='text-align:right;'>"
+                    f"<div style='font-size:0.78rem;color:#00d4ff;font-weight:700;'>{prob_display}</div>"
+                    f"<div style='font-size:0.68rem;color:#6b7280;'>{ts}</div>"
+                    f"</div></div>"
+                )
+                st.markdown(row, unsafe_allow_html=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Point d'entrée principal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -394,6 +585,16 @@ def render_top_under25_page(api) -> None:
         "<span style='color:#a855f7;'>Qualité avant quantité · UNDER_SCORE ≥55</span></p>",
         unsafe_allow_html=True,
     )
+
+    # Tentative silencieuse : valider les prédictions PENDING via un validateur dédié
+    try:
+        from modules.top_under25_live.under25_monitor import validate_pending as _validate_pending
+        updated = _validate_pending(api)
+        if updated:
+            st.success(f"Mises à jour : {len(updated)} prédiction(s) résolue(s)")
+            st.rerun()
+    except Exception:
+        pass
 
     col_cont, col_refresh = st.columns([3, 1])
     with col_cont:
@@ -536,6 +737,91 @@ def render_top_under25_page(api) -> None:
             "🟣 Aucun match futur sélectionné pour le moment</div>",
             unsafe_allow_html=True,
         )
+
+    # Afficher les tableaux prédictions après enregistrement des live/futurs
+    try:
+        # Prefer persistent registry (cross-session) — si vide, utiliser session_state
+        try:
+            from modules.top_under25_live.prediction_registry import get_all_predictions
+            all_preds = get_all_predictions()
+        except Exception:
+            all_preds = []
+        if all_preds:
+            preds_today = [p for p in all_preds]
+            preds_week = [p for p in all_preds]
+        else:
+            preds_today = get_predictions(days=1)
+            preds_week = get_predictions(days=7)
+
+        def _row_html(p: dict) -> str:
+            status = p.get('status', 'pending')
+            if status in ('validated',) and p.get('result') == 'VALIDATED':
+                row_bg = 'rgba(34,197,94,0.06)'
+                left = '#22c55e'
+                status_label = 'WON'
+            elif status in ('validated',) and p.get('result') == 'FAILED':
+                row_bg = 'rgba(239,68,68,0.06)'
+                left = '#ef4444'
+                status_label = 'LOST'
+            elif status == 'win':
+                row_bg = 'rgba(34,197,94,0.06)'
+                left = '#22c55e'
+                status_label = 'WON'
+            elif status == 'loss':
+                row_bg = 'rgba(239,68,68,0.06)'
+                left = '#ef4444'
+                status_label = 'LOST'
+            else:
+                row_bg = 'rgba(255,255,255,0.02)'
+                left = '#9ca3af'
+                status_label = 'PENDING'
+            ts = (p.get('timestamp_prediction') or p.get('timestamp',''))[:16].replace('T', ' ')
+            home = p.get('home_name','?')
+            away = p.get('away_name','?')
+            pred = p.get('prediction') or p.get('predicted_market') or 'UNDER 2.5'
+            return (f"<tr style='background:{row_bg};'>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);color:{left};font-weight:800;'>{status_label}</td>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{ts}</td>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{home} vs {away}</td>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{pred}</td>"
+                    f"</tr>")
+
+        # render 'Prédictions du jour' table
+        st.markdown("<div style='margin-top:14px;font-weight:700;'>Prédictions du jour</div>", unsafe_allow_html=True)
+        if preds_today:
+            rows = "".join(_row_html(p) for p in sorted(preds_today, key=lambda x: x.get('timestamp_prediction', x.get('timestamp','')), reverse=True))
+            table_html = ("<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
+                          "<thead><tr>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+                          "</tr></thead>"
+                          f"<tbody>{rows}</tbody></table>")
+            st.markdown(table_html, unsafe_allow_html=True)
+        else:
+            st.caption("Aucune prédiction émise aujourd'hui.")
+
+        # render 'Statistiques cette semaine' table
+        st.markdown("<div style='margin-top:18px;font-weight:700;'>Statistiques cette semaine</div>", unsafe_allow_html=True)
+        if preds_week:
+            rows = "".join(_row_html(p) for p in sorted(preds_week, key=lambda x: x.get('timestamp_prediction', x.get('timestamp','')), reverse=True))
+            table_html = ("<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
+                          "<thead><tr>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+                          "</tr></thead>"
+                          f"<tbody>{rows}</tbody></table>")
+            st.markdown(table_html, unsafe_allow_html=True)
+        else:
+            st.caption("Aucune prédiction émise ces 7 derniers jours.")
+    except Exception:
+        try:
+            _render_prediction_tables()
+        except Exception:
+            pass
 
     # ══ SECTION 3 — HISTORIQUE ════════════════════════════════════════════
     _section_header(

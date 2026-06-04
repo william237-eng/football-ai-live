@@ -44,6 +44,9 @@ def render_sidebar():
         over25_type     = "primary" if active_page == "over25"    else "secondary"
         under25_type    = "primary" if active_page == "under25"   else "secondary"
         daily_type      = "primary" if active_page == "daily"     else "secondary"
+        yellow35_type   = "primary" if active_page == "yellow35"  else "secondary"
+        redcards_type   = "primary" if active_page == "redcards"  else "secondary"
+        worldcup_type   = "primary" if active_page == "worldcup"  else "secondary"
         history_type    = "primary" if active_page == "history"   else "secondary"
         victories_type  = "primary" if active_page == "victories" else "secondary"
 
@@ -121,6 +124,33 @@ def render_sidebar():
             on_click=_set_page,
             args=("daily",),
             type=daily_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "🟨 CARTONS +3.5",
+            key="yellow35_button",
+            on_click=_set_page,
+            args=("yellow35",),
+            type=yellow35_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "🏆 Coupe du Monde",
+            key="worldcup_button",
+            on_click=_set_page,
+            args=("worldcup",),
+            type=worldcup_type,
+            use_container_width=True,
+        )
+
+        st.button(
+            "🔴 AU MOINS 1 ROUGE",
+            key="redcards_button",
+            on_click=_set_page,
+            args=("redcards",),
+            type=redcards_type,
             use_container_width=True,
         )
 

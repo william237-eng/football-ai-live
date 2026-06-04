@@ -204,21 +204,86 @@ def validate_pending(api) -> List[Dict]:
     for pred in pending:
         match_id = pred["match_id"]
         try:
+            # Récupérer le fixture via l'API (différents providers ont des retours différents)
             if hasattr(api, "get_fixture_detail"):
                 raw = api.get_fixture_detail(match_id)
             else:
                 raw, _ = api.get_fixture_by_id(match_id)
-            items  = _safe_response(raw)
+
+            items = _safe_response(raw)
             if not items:
+                # Pas de données réelles, ne rien faire
                 continue
-            item   = items[0]
-            status = (item.get("fixture") or {}).get("status") or {}
-            short  = status.get("short", "")
+
+            item = items[0]
+
+            # Extraire status short et scores robustement selon formes possibles
+            def _extract_status_and_scores(it: Dict) -> tuple:
+                # Priorité : fixture.status.short
+                status_short = ""
+                home_g = None
+                away_g = None
+
+                if isinstance(it.get("fixture"), dict):
+                    st = it["fixture"].get("status") or {}
+                    status_short = st.get("short", "")
+
+                # Fallback : top-level status
+                if not status_short and isinstance(it.get("status"), dict):
+                    status_short = it["status"].get("short", "")
+
+                # Some APIs return status as string
+                if not status_short and isinstance(it.get("status"), str):
+                    status_short = it.get("status")
+
+                # Extract goals from possible locations
+                goals = it.get("goals") or {}
+                if not goals:
+                    # Some providers use 'score' with nested periods
+                    score = it.get("score") or {}
+                    # Try fulltime or extratime
+                    ft = score.get("fulltime") or score.get("extratime") or {}
+                    if isinstance(ft, dict):
+                        home_g = ft.get("home")
+                        away_g = ft.get("away")
+                    else:
+                        # If ft is not dict, try numeric fields
+                        home_g = score.get("home")
+                        away_g = score.get("away")
+                else:
+                    home_g = goals.get("home")
+                    away_g = goals.get("away")
+
+                # Final fallback: try nested teams/goals
+                if home_g is None or away_g is None:
+                    # Some providers include 'teams'->'home'->'goals'
+                    try:
+                        teams = it.get("teams") or {}
+                        home_g = home_g if home_g is not None else teams.get("home", {}).get("goals")
+                        away_g = away_g if away_g is not None else teams.get("away", {}).get("goals")
+                    except Exception:
+                        pass
+
+                # Ensure numeric
+                try:
+                    gh = float(home_g) if home_g is not None else 0.0
+                except Exception:
+                    gh = 0.0
+                try:
+                    ga = float(away_g) if away_g is not None else 0.0
+                except Exception:
+                    ga = 0.0
+
+                return status_short, gh, ga
+
+            short, gh, ga = _extract_status_and_scores(item)
+
+            # Considérer match terminé si status indique FT/AET/PEN
             if short not in ("FT", "AET", "PEN"):
+                # Si status empty but scores non nuls et match_time passé, on pourrait considérer terminé,
+                # mais conformément à la règle 100% données réelles, on n'invente pas l'état.
                 continue
-            goals  = item.get("goals") or {}
-            gh     = float(goals.get("home") or 0)
-            ga     = float(goals.get("away") or 0)
+
             winner_actual = "home" if gh > ga else ("away" if ga > gh else "draw")
             result = "WON" if winner_actual == pred["winner"] else "LOST"
             update_prediction_result(match_id, result)

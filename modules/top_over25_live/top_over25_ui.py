@@ -555,6 +555,148 @@ def _render_stats_block() -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
+def _render_detailed_tables() -> None:
+    """Affiche deux tableaux détaillés : prédictions du jour et des 7 derniers jours.
+
+    Utilise le registre des prédictions `prediction_registry` pour lister
+    les prédictions réellement émises. Ne modifie rien, affiche seulement.
+    """
+    try:
+        from modules.top_over25_live.prediction_registry import get_all_predictions
+        from datetime import datetime, timezone, timedelta
+    except Exception:
+        st.caption("Données de registre indisponibles.")
+        return
+
+    all_preds = get_all_predictions() or []
+    if not all_preds:
+        st.caption("Aucune prédiction enregistrée.")
+        return
+
+    now = datetime.now(timezone.utc)
+    start_today = (now - timedelta(days=1))
+    start_week = (now - timedelta(days=7))
+
+    preds_today = [p for p in all_preds
+                   if p.get("timestamp_prediction") and datetime.fromisoformat(p["timestamp_prediction"]) >= start_today]
+
+    preds_week = [p for p in all_preds
+                  if p.get("timestamp_prediction") and datetime.fromisoformat(p["timestamp_prediction"]) >= start_week]
+
+    def _row_html(p: dict) -> str:
+        status = p.get("status", "pending")
+        result = p.get("result") or ""
+        if status == "validated" and result == "VALIDATED":
+            row_bg = "rgba(34,197,94,0.06)"
+            left = "#22c55e"
+            status_label = "WON"
+        elif status == "validated" and result == "FAILED":
+            row_bg = "rgba(239,68,68,0.06)"
+            left = "#ef4444"
+            status_label = "LOST"
+        else:
+            row_bg = "rgba(255,255,255,0.02)"
+            left = "#9ca3af"
+            status_label = "PENDING"
+
+        ts = (p.get("timestamp_prediction") or "")[:16].replace("T", " ")
+        home = p.get("home_name") or p.get("home_team") or "?"
+        away = p.get("away_name") or p.get("away_team") or "?"
+        pred = p.get("prediction") or p.get("prediction", "OVER_2.5")
+        return (
+            f"<tr style='background:{row_bg};'>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);color:{left};font-weight:800;'>{status_label}</td>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{ts}</td>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{home} vs {away}</td>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{pred}</td>"
+            f"</tr>"
+        )
+
+    # Tableau aujourd'hui (identique à Victory UI)
+    st.markdown("<div style='margin-top:14px;font-weight:700;'>Prédictions du jour</div>", unsafe_allow_html=True)
+    if preds_today:
+        rows = "".join(_row_html(p) for p in sorted(preds_today, key=lambda x: x.get("timestamp_prediction", ""), reverse=True))
+        table_html = (
+            "<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
+            "<thead><tr>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+            "</tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
+    else:
+        st.caption("Aucune prédiction émise aujourd'hui.")
+
+    # Tableau 7 jours (identique à Victory UI)
+    st.markdown("<div style='margin-top:18px;font-weight:700;'>Statistiques cette semaine</div>", unsafe_allow_html=True)
+    if preds_week:
+        rows = "".join(_row_html(p) for p in sorted(preds_week, key=lambda x: x.get("timestamp_prediction", ""), reverse=True))
+        table_html = (
+            "<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
+            "<thead><tr>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+            "</tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
+    else:
+        st.caption("Aucune prédiction émise ces 7 derniers jours.")
+
+    # ── Historique des prédictions (dernier 50)
+    try:
+        from modules.top_over25_live.prediction_registry import get_all_predictions
+    except Exception:
+        return
+
+    history = sorted(get_all_predictions() or [], key=lambda x: x.get("timestamp_prediction") or "", reverse=True)[:50]
+    with st.expander("📜 Historique des prédictions (dernier 50)", expanded=False):
+        if not history:
+            st.caption("Aucune prédiction enregistrée.")
+        else:
+            for p in history:
+                status = p.get("status", "pending")
+                result = p.get("result") or ""
+                if status == "validated" and result == "VALIDATED":
+                    s_color = "#22c55e"
+                    s_label = "✅ GAGNÉ"
+                elif status == "validated" and result == "FAILED":
+                    s_color = "#ef4444"
+                    s_label = "❌ PERDU"
+                else:
+                    s_color = "#f59e0b"
+                    s_label = "⏳ Attente"
+
+                ts = (p.get("timestamp_prediction") or "")[:16].replace("T", " ")
+                home = p.get("home_name") or p.get("home_team") or "?"
+                away = p.get("away_name") or p.get("away_team") or "?"
+                win_score = p.get("score_ia") or 0
+                pred_lbl = p.get("prediction", "OVER_2.5")
+
+                row = (
+                    f"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;"
+                    f"padding:10px 14px;margin-bottom:6px;background:rgba(255,255,255,0.03);"
+                    f"border:1px solid rgba(255,255,255,0.07);border-radius:10px;'>"
+                    f"<span style='font-size:0.75rem;color:{s_color};font-weight:800;min-width:72px;'>{s_label}</span>"
+                    f"<div style='flex:1;min-width:0;'>"
+                    f"<div style='font-size:0.82rem;font-weight:700;color:#e2e8f0;'>"
+                    f"{home} vs {away}</div>"
+                    f"<div style='font-size:0.70rem;color:#6b7280;'>"
+                    f"{p.get('league_name','')} · {pred_lbl}</div>"
+                    f"</div>"
+                    f"<div style='text-align:right;'>"
+                    f"<div style='font-size:0.78rem;color:#00d4ff;font-weight:700;'>{win_score}/100</div>"
+                    f"<div style='font-size:0.68rem;color:#6b7280;'>Prob {round((p.get('probability') or p.get('probability_pct',0))*100 if p.get('probability') and p.get('probability')<=1 else p.get('probability_pct',0))}% · {ts}</div>"  # type: ignore
+                    f"</div>"
+                    f"</div>"
+                )
+                st.markdown(row, unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Point d'entrée principal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -580,6 +722,18 @@ def render_top_over25_page(api) -> None:
         "<span style='color:#f59e0b;'>Qualité avant quantité</span></p>",
         unsafe_allow_html=True,
     )
+
+    # Tentative silencieuse : valider les prédictions PENDING via un validateur dédié
+    try:
+        from modules.top_over25_live.over25_monitor import validate_pending as _validate_pending
+        updated = _validate_pending(api)
+        # Si des mises à jour ont eu lieu, forcer rechargement pour afficher les statuts
+        if updated:
+            st.success(f"Mises à jour : {len(updated)} prédiction(s) résolue(s)")
+            st.rerun()
+    except Exception:
+        # Ne pas bloquer la page si l'API est indisponible
+        pass
 
     # ── Filtres ──────────────────────────────────────────────────────────
     col_cont, col_refresh = st.columns([3, 1])
@@ -794,6 +948,11 @@ def render_top_over25_page(api) -> None:
         "#a78bfa", "rgba(167,139,250,0.15)"
     )
     _render_stats_block()
+    # Afficher tableaux détaillés : aujourd'hui et 7 jours
+    try:
+        _render_detailed_tables()
+    except Exception:
+        pass
 
     # ── Indicateur live ───────────────────────────────────────────────────
     if live_matches:

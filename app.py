@@ -10,6 +10,9 @@ from components.analysis_dashboard import render_analysis_dashboard
 from components.betting_page import render_betting_page, render_floating_bet_button
 from modules.top_over25_live.top_over25_ui import render_top_over25_page
 from modules.daily_predictions.daily_predictions_ui import render_daily_predictions_page
+from modules.daily_predictions.yellow_3_5_ui import render_yellow_3_5_page
+from modules.daily_predictions.red_cards_ui import render_red_cards_page
+from modules.world_cup.world_cup_ui import render_world_cup_page
 from modules.history_results.history_results_ui import render_history_page
 from modules.top_under25_live.under25_ui import render_top_under25_page
 from modules.top_victories.victory_ui import render_top_victories_page
@@ -178,10 +181,28 @@ def main():
             try:
                 _live_bets = _fetch_live_for_betting()
             except Exception:
-                pass
+                _live_bets = []
             try:
                 _future_bets = _fetch_future_for_betting()
             except Exception:
+                _future_bets = []
+
+            # Vérification automatique des tickets actifs :
+            # - N'effectue que des appels réels à l'API via check_all_active_tickets
+            # - Ne fabrique aucune donnée. Si l'API est indisponible ou insufisante, on ne change rien.
+            try:
+                from modules.betting.ticket_manager import check_all_active_tickets
+                with st.spinner("Vérification automatique des tickets actifs…"):
+                    try:
+                        results = check_all_active_tickets(api)
+                        # Si au moins un ticket a été résolu, forcer un rerun pour mettre à jour l'UI
+                        if any(r.get("status") in ("WON", "LOST") for r in results):
+                            st.experimental_rerun()
+                    except Exception:
+                        # En cas d'erreur (API down, etc.) : ne rien faire — respecter règle 100% réelles
+                        pass
+            except Exception:
+                # Import échoué ou autres erreurs : ne pas bloquer l'interface
                 pass
 
             render_betting_page(api=api, live_matches=_live_bets, future_matches=_future_bets)
@@ -209,6 +230,39 @@ def main():
         # =========================
         if active_page == "daily":
             render_daily_predictions_page(api=api)
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: CARTONS JAUNES +3.5
+        # =========================
+        if active_page == "yellow35":
+            try:
+                render_yellow_3_5_page(api=api)
+            except Exception as e:
+                st.error(f"Erreur page cartons +3.5 : {e}")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: CARTONS ROUGES (>=1)
+        # =========================
+        if active_page == "redcards":
+            try:
+                render_red_cards_page(api=api)
+            except Exception as e:
+                st.error(f"Erreur page cartons rouges : {e}")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # =========================
+        # Page: COUPE DU MONDE
+        # =========================
+        if active_page == "worldcup":
+            try:
+                render_world_cup_page(api=api)
+            except Exception as e:
+                st.error(f"Erreur page Coupe du Monde : {e}")
             st.markdown("</div>", unsafe_allow_html=True)
             return
 

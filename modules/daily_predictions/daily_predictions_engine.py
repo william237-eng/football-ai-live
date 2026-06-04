@@ -272,7 +272,14 @@ MIN_WIN_PROB    = 0.55   # min pour qu'une victoire soit sélectionnée
 MIN_DC_PROB     = 0.70   # double chance
 MIN_BTTS_PROB   = 0.55   # GG
 MIN_CORNER_PROB = 0.45   # combiné corners+cartons (plus difficile à atteindre)
-TOP_N           = 10
+# Top limits par marché
+TOP_N_WIN = 10
+TOP_N_DC = 20
+TOP_N_BTTS = 10
+TOP_N_CC = 10
+TOP_N_YELLOW = 20
+TOP_N_YELLOW_O35 = 20
+TOP_N_RED = 20
 
 
 def _empty_results() -> Dict[str, List[Dict[str, Any]]]:
@@ -326,6 +333,8 @@ def analyze_fixtures_for_daily(
     btts_list    = []
     cc_list      = []
     top_candidates = []
+    # Collect all market predictions across fixtures so we can produce top-N per market
+    all_predictions: List[Dict[str, Any]] = []
 
     for fx in fixtures:
         info = _base_match_info(fx)
@@ -350,6 +359,12 @@ def analyze_fixtures_for_daily(
         dc_probs  = _compute_double_chance(win_probs)
         btts_prob = _compute_btts(home_stats, away_stats)
         cc_probs  = _compute_corners_cards(home_stats, away_stats)
+        # Calcul spécifique pour cartons jaunes OVER 7.5 (seuil 8)
+        # Reprendre la logique de lam_cards pour estimer lambda cartes, puis Poisson over(8)
+        win_rate_gap = abs(home_stats["win_rate"] - away_stats["win_rate"])
+        lam_cards_yellow = 3.8 - win_rate_gap * 1.2
+        lam_cards_yellow = max(2.0, min(14.0, lam_cards_yellow))
+        p_over_yellow_7_5 = _poisson_over(lam_cards_yellow, 8)
 
         base = {
             **info,
@@ -436,25 +451,91 @@ def analyze_fixtures_for_daily(
                 "_rank_score": p_comb if p_comb >= MIN_CORNER_PROB else p_comb * 0.78,
             })
 
-        top_candidates.append(max(match_predictions, key=lambda x: x["_rank_score"]))
+        # Prédiction additionnelle: CARTONS JAUNES OVER 7.5 (top separate)
+        conf_lbl_y, conf_col_y = _confidence_label(p_over_yellow_7_5)
+        match_predictions.append({
+                **base,
+                "market":        "YELLOW_CARDS",
+                "prediction":    "Over 7.5 cartons jaunes",
+                "prob":          p_over_yellow_7_5,
+                "pct":           round(p_over_yellow_7_5 * 100, 1),
+                "conf_label":    conf_lbl_y,
+                "conf_color":    conf_col_y,
+                "detail":        f"Lambda cartes ≈ {round(lam_cards_yellow,1)} · Prob Over7.5: {round(p_over_yellow_7_5*100,1)}%",
+                "justification": f"Estimation basée sur l'intensité et l'écart de forme (lam cartes ≈ {round(lam_cards_yellow,1)})",
+                "_rank_score": p_over_yellow_7_5 if p_over_yellow_7_5 >= 0.35 else p_over_yellow_7_5 * 0.75,
+            })
 
-    top_candidates.sort(key=lambda x: x["_rank_score"], reverse=True)
-    for prediction in top_candidates[:TOP_N]:
-        prediction.pop("_rank_score", None)
-        if prediction["market"] == "VICTOIRE":
-            wins_list.append(prediction)
-        elif prediction["market"] == "DOUBLE CHANCE":
-            dc_list.append(prediction)
-        elif prediction["market"] == "GG (BTTS)":
-            btts_list.append(prediction)
-        else:
-            cc_list.append(prediction)
+        # Prédiction additionnelle: CARTONS JAUNES OVER 3.5 (seuil >=4 cartons)
+        p_over_yellow_3_5 = _poisson_over(lam_cards_yellow, 4)
+        conf_lbl_35, conf_col_35 = _confidence_label(p_over_yellow_3_5)
+        match_predictions.append({
+                **base,
+                "market":        "YELLOW_CARDS_O3_5",
+                "prediction":    "Over 3.5 cartons jaunes",
+                "prob":          p_over_yellow_3_5,
+                "pct":           round(p_over_yellow_3_5 * 100, 1),
+                "conf_label":    conf_lbl_35,
+                "conf_color":    conf_col_35,
+                "detail":        f"Lambda cartes ≈ {round(lam_cards_yellow,1)} · Prob Over3.5: {round(p_over_yellow_3_5*100,1)}%",
+                "justification": f"Estimation basée sur l'intensité et l'écart de forme (lam cartes ≈ {round(lam_cards_yellow,1)})",
+                "_rank_score": p_over_yellow_3_5 if p_over_yellow_3_5 >= 0.40 else p_over_yellow_3_5 * 0.8,
+            })
+
+        # Prédiction additionnelle: AU MOINS 1 CARTON ROUGE (probabilité estimée)
+        # On estime un lambda de cartons rouges comme une fraction de lambda cartons jaunes
+        lam_red = max(0.05, min(1.5, lam_cards_yellow * 0.18))
+        p_at_least_one_red = 1.0 - math.exp(-lam_red)
+        conf_lbl_r, conf_col_r = _confidence_label(p_at_least_one_red)
+        match_predictions.append({
+                **base,
+                "market":        "RED_CARDS",
+                "prediction":    "Au moins 1 carton rouge",
+                "prob":          p_at_least_one_red,
+                "pct":           round(p_at_least_one_red * 100, 1),
+                "conf_label":    conf_lbl_r,
+                "conf_color":    conf_col_r,
+                "detail":        f"Lambda rouges ≈ {round(lam_red,2)} · Prob ≥1 rouge: {round(p_at_least_one_red*100,1)}%",
+                "justification": f"Estimation basée sur la propension aux cartons du match (lam rouges ≈ {round(lam_red,2)})",
+                "_rank_score": p_at_least_one_red if p_at_least_one_red >= 0.12 else p_at_least_one_red * 0.85,
+            })
+
+        # Garder la meilleure prédiction par fixture pour un classement global
+        try:
+            top_candidates.append(max(match_predictions, key=lambda x: x.get("_rank_score", 0)))
+        except Exception:
+            pass
+        # Ajouter toutes les prédictions de ce fixture à la liste globale
+        for mp in match_predictions:
+            all_predictions.append(mp)
+
+    # Maintenant construire top-N par marché à partir de all_predictions
+    def _top_for_market(market_key: str, top_n: int) -> List[Dict[str, Any]]:
+        cand = [p for p in all_predictions if p.get("market") == market_key]
+        cand.sort(key=lambda x: x.get("_rank_score", 0), reverse=True)
+        out = []
+        for p in cand[:top_n]:
+            q = dict(p)
+            q.pop("_rank_score", None)
+            out.append(q)
+        return out
+
+    wins_list = _top_for_market("VICTOIRE", TOP_N_WIN)
+    dc_list = _top_for_market("DOUBLE CHANCE", TOP_N_DC)
+    btts_list = _top_for_market("GG (BTTS)", TOP_N_BTTS)
+    cc_list = _top_for_market("CORNERS + CARTONS", TOP_N_CC)
+    yellow_list = _top_for_market("YELLOW_CARDS", TOP_N_YELLOW)
+    yellow_o35_list = _top_for_market("YELLOW_CARDS_O3_5", TOP_N_YELLOW_O35)
+    red_list = _top_for_market("RED_CARDS", TOP_N_RED)
 
     return {
-        "wins":          wins_list,
-        "double_chance": dc_list,
-        "btts":          btts_list,
-        "corners_cards": cc_list,
+        "wins":              wins_list,
+        "double_chance":     dc_list,
+        "btts":              btts_list,
+        "corners_cards":     cc_list,
+        "yellow_cards":      yellow_list,
+        "yellow_cards_o3_5": yellow_o35_list,
+        "red_cards":         red_list,
     }
 
 

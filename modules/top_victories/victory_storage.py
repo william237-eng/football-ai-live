@@ -210,5 +210,64 @@ def get_prediction_history(limit: int = 50) -> List[Dict]:
             else:
                 pred["status_display"] = "⏳ Attente"
             history.append(pred)
-        
+
         return history
+
+
+def get_weekly_stats() -> Dict[str, Any]:
+    """Statistiques pour la semaine en cours (du lundi au dimanche)."""
+    from datetime import timedelta
+
+    today = datetime.now(timezone.utc).date()
+    # Début de semaine (lundi)
+    start_of_week = today - timedelta(days=today.weekday())
+    end_of_week = start_of_week + timedelta(days=6)
+
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM victory_predictions
+            WHERE DATE(timestamp) BETWEEN ? AND ?
+            ORDER BY timestamp DESC
+            """,
+            (start_of_week.isoformat(), end_of_week.isoformat()),
+        ).fetchall()
+
+        if not rows:
+            return {
+                "start": start_of_week.isoformat(),
+                "end": end_of_week.isoformat(),
+                "selected": 0,
+                "won": 0,
+                "lost": 0,
+                "pending": 0,
+                "winrate": 0.0,
+                "roi": 0.0,
+                "profit": 0.0,
+                "predictions": [],
+            }
+
+        preds = [dict(r) for r in rows]
+        selected = len(preds)
+        won = sum(1 for d in preds if d["status"] == "WON")
+        lost = sum(1 for d in preds if d["status"] == "LOST")
+        pending = sum(1 for d in preds if d["status"] == "PENDING")
+        resolved = won + lost
+        winrate = round(won / resolved * 100, 1) if resolved > 0 else 0.0
+
+        profit = (won * 0.8) - (lost * 1.0)
+        roi = round((profit / selected) * 100, 1) if selected > 0 else 0.0
+
+        return {
+            "start": start_of_week.isoformat(),
+            "end": end_of_week.isoformat(),
+            "selected": selected,
+            "won": won,
+            "lost": lost,
+            "pending": pending,
+            "winrate": winrate,
+            "roi": roi,
+            "profit": round(profit, 2),
+            "predictions": preds,
+        }
+

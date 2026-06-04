@@ -74,6 +74,15 @@ def _render_card(m: Dict[str, Any], accent: str) -> None:
             f"<div style='font-weight:800;color:{accent};'>{pk}%</div></div>"
             f"</div>"
         )
+    elif market == "YELLOW_CARDS":
+        pc = round(m.get("prob", 0) * 100, 1)
+        extra_html = (
+            f"<div style='display:grid;grid-template-columns:1fr;gap:6px;margin-top:8px;'>"
+            f"<div style='background:rgba(255,255,255,0.05);border-radius:8px;padding:10px;text-align:center;'>"
+            f"<div style='font-size:0.75rem;color:#aaa;'>Probabilité Over 7.5 cartons jaunes</div>"
+            f"<div style='font-weight:800;color:{accent};'>{pc}%</div></div>"
+            f"</div>"
+        )
     elif market == "VICTOIRE":
         ph = round(m.get("win_probs", {}).get("p_home", 0) * 100, 1)
         pa = round(m.get("win_probs", {}).get("p_away", 0) * 100, 1)
@@ -205,6 +214,16 @@ def render_daily_predictions_page(api) -> None:
         unsafe_allow_html=True,
     )
 
+    # Tentative silencieuse : valider les prédictions PENDING cartons jaunes via le moniteur dédié
+    try:
+        from modules.daily_predictions.daily_predictions_monitor import validate_pending as _validate_pending
+        updated = _validate_pending(api)
+        if updated:
+            st.success(f"Mises à jour (cartons) : {len(updated)} prédiction(s) résolue(s)")
+            st.rerun()
+    except Exception:
+        pass
+
     col_ref, col_info = st.columns([1, 3])
     with col_ref:
         force_refresh = st.button("🔄 Actualiser", use_container_width=True, key="daily_refresh")
@@ -251,6 +270,43 @@ def render_daily_predictions_page(api) -> None:
     # ── Résumé ────────────────────────────────────────────────────────────
     _render_summary(results)
 
+    # Afficher statistiques réelles simples pour les cartons jaunes (registre persistant)
+    try:
+        from modules.daily_predictions.prediction_registry import compute_real_stats
+        stats_30 = compute_real_stats(days=30)
+        stats_7 = compute_real_stats(days=7)
+        stats_1 = compute_real_stats(days=1)
+
+        # Affichage : bloc 30j, et deux petits blocs côte-à-côte pour 1j et 7j
+        st.markdown(
+            f"<div style='margin-top:10px;background:rgba(255,255,255,0.03);border-radius:10px;padding:10px;'>"
+            f"<div style='font-weight:800;color:#f59e0b;'>📊 Cartons jaunes — statistiques réelles (30j)</div>"
+            f"<div style='font-size:0.9rem;margin-top:6px;'>Validés: {stats_30['won']} · Échoués: {stats_30['lost']} · En attente: {stats_30['pending']} · Winrate: {stats_30['winrate']}% · ROI: {stats_30['roi']}%</div>"
+            f"</div>", unsafe_allow_html=True
+        )
+
+        # Deux colonnes pour aujourd'hui et dernière semaine
+        col_a, col_b = st.columns([1, 1])
+        with col_a:
+            today_label = datetime.date.today().strftime("%d/%m/%Y")
+            st.markdown(
+                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
+                f"<div style='font-weight:800;color:#fb923c;'>📅 Aujourd'hui — {today_label}</div>"
+                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_1['total_emitted']} · Validés: {stats_1['won']} · Échoués: {stats_1['lost']} · En attente: {stats_1['pending']} · Winrate: {stats_1['winrate']}% · ROI: {stats_1['roi']}%</div>"
+                f"</div>", unsafe_allow_html=True
+            )
+
+        with col_b:
+            week_label = (datetime.date.today() - datetime.timedelta(days=7)).strftime("%d/%m/%Y")
+            st.markdown(
+                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
+                f"<div style='font-weight:800;color:#f97316;'>🗓️ Dernière semaine (7j)</div>"
+                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_7['total_emitted']} · Validés: {stats_7['won']} · Échoués: {stats_7['lost']} · En attente: {stats_7['pending']} · Winrate: {stats_7['winrate']}% · ROI: {stats_7['roi']}%</div>"
+                f"</div>", unsafe_allow_html=True
+            )
+    except Exception:
+        pass
+
     # ════════════════════════════════════════════════════════════════════
     # RUBRIQUE 1 — VICTOIRES
     # ════════════════════════════════════════════════════════════════════
@@ -264,10 +320,12 @@ def render_daily_predictions_page(api) -> None:
     # ════════════════════════════════════════════════════════════════════
     # RUBRIQUE 2 — DOUBLE CHANCE
     # ════════════════════════════════════════════════════════════════════
-    _section_divider("🔄 DOUBLE CHANCE", len(results["double_chance"]), "#8b5cf6", "rgba(139,92,246,0.15)")
+    # Afficher jusqu'à 20 résultats pour Double Chance
+    dc_display = results["double_chance"][:20]
+    _section_divider("🔄 DOUBLE CHANCE", len(dc_display), "#8b5cf6", "rgba(139,92,246,0.15)")
     st.caption("Meilleure double chance (1X / X2 / 12) par match · Seuil ≥ 70%")
     _render_grid(
-        results["double_chance"], "#8b5cf6",
+        dc_display, "#8b5cf6",
         "Aucune double chance assez sûre aujourd'hui (seuil 70%)."
     )
 
@@ -284,12 +342,16 @@ def render_daily_predictions_page(api) -> None:
     # ════════════════════════════════════════════════════════════════════
     # RUBRIQUE 4 — CORNERS + CARTONS
     # ════════════════════════════════════════════════════════════════════
-    _section_divider("🟨 OVER 7.5 CORNERS + 3 CARTONS JAUNES", len(results["corners_cards"]), "#f59e0b", "rgba(245,158,11,0.15)")
+    # Afficher seulement top 5 pour Corners+Cartons
+    corners_display = results["corners_cards"][:5]
+    _section_divider("🟨 OVER 7.5 CORNERS + 3 CARTONS JAUNES", len(corners_display), "#f59e0b", "rgba(245,158,11,0.15)")
     st.caption("Over 7.5 corners ET au moins 3 cartons jaunes · Seuil combiné ≥ 45%")
     _render_grid(
-        results["corners_cards"], "#f59e0b",
+        corners_display, "#f59e0b",
         "Aucun match répondant aux critères corners+cartons aujourd'hui (seuil 45%)."
     )
+
+
 
     st.markdown(
         "<div style='text-align:center;font-size:0.7rem;color:#555;margin-top:16px;'>"

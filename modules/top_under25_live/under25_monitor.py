@@ -99,6 +99,25 @@ def register_prediction(m: Dict[str, Any]) -> None:
         "away_score":           None,
     }
     db.append(entry)
+    # Also persist to registry file for cross-session visibility
+    try:
+        from modules.top_under25_live.prediction_registry import register_prediction as _reg
+        _reg({
+            "fixture_id": m.get("fixture_id"),
+            "home_name": m.get("home_name"),
+            "away_name": m.get("away_name"),
+            "league_name": m.get("league_name"),
+            "league_country": m.get("league_country"),
+            "start_time": m.get("start_time"),
+            "start_date_display": m.get("start_date_display"),
+            "under25_prob": m.get("under25_prob", 0.0),
+            "under25_pct": m.get("under25_pct", 0.0),
+            "conf_label": m.get("conf_label", ""),
+            "under_score": m.get("under_score", 0.0),
+            "match_type": m.get("match_type", "unknown"),
+        })
+    except Exception:
+        pass
 
 
 def update_prediction_result(match_id: Any, home_score: int, away_score: int) -> None:
@@ -148,6 +167,32 @@ def get_prediction_stats() -> Dict[str, Any]:
         "roi":         roi,
         "profit":      profit,
     }
+
+
+def get_predictions(days: int = 7) -> List[Dict[str, Any]]:
+    """
+    Retourne la liste des prédictions émises au cours des `days` derniers jours.
+    Les entrées proviennent de la DB stockée en session (st.session_state).
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    db = _get_db()
+    results: List[Dict[str, Any]] = []
+    for e in db:
+        ts = e.get("timestamp_prediction")
+        if not ts:
+            continue
+        try:
+            t = datetime.fromisoformat(ts)
+        except Exception:
+            # ignorer les timestamps invalides
+            continue
+        if t >= cutoff:
+            results.append(e)
+    # trier par date décroissante
+    results.sort(key=lambda x: x.get("timestamp_prediction", ""), reverse=True)
+    return results
 
 
 def _parse(payload: Any) -> List[Dict]:
@@ -570,3 +615,90 @@ def refresh_live_matches(
         "future":   current_data.get("future") or [],
         "resolved": current_data.get("resolved") or [],
     }
+
+
+def validate_pending(api) -> List[Dict]:
+    """Vérifie les prédictions PENDING stockées (session or registry) et met à jour leur statut
+    dans le registre persistant `prediction_registry_under25.json` si l'API indique un état final.
+    Retourne la liste des prédictions mises à jour.
+    """
+    try:
+        from modules.top_under25_live.prediction_registry import get_pending_predictions, validate_prediction
+    except Exception:
+        return []
+
+    pending = get_pending_predictions()
+    updated = []
+    for pred in pending:
+        fixture_id = pred.get("fixture_id")
+        if not fixture_id:
+            continue
+        try:
+            if hasattr(api, "get_fixture_detail"):
+                raw = api.get_fixture_detail(fixture_id)
+            else:
+                raw, _ = api.get_fixture_by_id(fixture_id)
+            # response parsing
+            items = []
+            if isinstance(raw, dict) and raw.get("response"):
+                items = raw.get("response")
+            elif isinstance(raw, list):
+                items = raw
+            if not items:
+                continue
+            item = items[0]
+
+            # extract status and goals robustly
+            def _extract(it):
+                status = ""
+                gh = None
+                ga = None
+                if isinstance(it.get("fixture"), dict):
+                    st = it["fixture"].get("status") or {}
+                    status = st.get("short", "")
+                if not status and isinstance(it.get("status"), dict):
+                    status = it["status"].get("short", "")
+                if not status and isinstance(it.get("status"), str):
+                    status = it.get("status")
+                goals = it.get("goals") or {}
+                if goals:
+                    gh = goals.get("home")
+                    ga = goals.get("away")
+                else:
+                    score = it.get("score") or {}
+                    ft = score.get("fulltime") or score.get("extratime") or {}
+                    if isinstance(ft, dict):
+                        gh = ft.get("home")
+                        ga = ft.get("away")
+                    else:
+                        gh = score.get("home")
+                        ga = score.get("away")
+                try:
+                    gh = int(gh) if gh is not None else 0
+                except Exception:
+                    try:
+                        gh = int(float(gh))
+                    except Exception:
+                        gh = 0
+                try:
+                    ga = int(ga) if ga is not None else 0
+                except Exception:
+                    try:
+                        ga = int(float(ga))
+                    except Exception:
+                        ga = 0
+                return status, gh, ga
+
+            status, gh, ga = _extract(item)
+            if status not in ("FT", "AET", "PEN"):
+                continue
+            total = gh + ga
+            # Under 2.5 validated if total <=2
+            result = "VALIDATED" if total <= 2 else "FAILED"
+            ok = validate_prediction(fixture_id, result, gh, ga)
+            if ok:
+                updated.append({**pred, "result": result, "home_score": gh, "away_score": ga})
+        except Exception:
+            continue
+    return updated
+

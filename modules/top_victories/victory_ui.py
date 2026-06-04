@@ -312,6 +312,20 @@ def _render_history_row(pred: Dict) -> str:
 def render_top_victories_page(api) -> None:
     init_db()
 
+    # Vérification automatique silencieuse des prédictions PENDING à l'ouverture de la page
+    try:
+        pending_list = get_pending_predictions()
+        if pending_list:
+            # Appel silencieux : si des mises à jour ont lieu, recharger l'interface
+            updated = validate_pending(api)
+            if updated:
+                # Afficher un message puis recharger pour montrer les statuts mis à jour
+                st.success(f"Mises à jour : {len(updated)} prédiction(s) résolue(s)")
+                st.rerun()
+    except Exception:
+        # Ne pas bloquer la page si l'API est indisponible
+        pass
+
     # ── Header ───────────────────────────────────────────────────────────────
     st.markdown(
         "<h2 style='font-size:1.6rem;margin-bottom:2px;'>🏆 TOP 10 VICTOIRES IA</h2>"
@@ -483,6 +497,116 @@ def render_top_victories_page(api) -> None:
         f"</div>",
         unsafe_allow_html=True,
     )
+
+    # ── Tableau détaillé des prédictions du jour (avec coloration selon résultat)
+    preds = daily_stats.get("predictions", [])
+    if preds:
+        rows_html = ""
+        for p in preds:
+            status = p.get("status", "PENDING")
+            if status == "WON":
+                row_bg = "rgba(34,197,94,0.08)"
+                left = "#22c55e"
+            elif status == "LOST":
+                row_bg = "rgba(239,68,68,0.08)"
+                left = "#ef4444"
+            else:
+                row_bg = "rgba(255,255,255,0.02)"
+                left = "#9ca3af"
+
+            ts = (p.get("timestamp") or "")[:16].replace("T", " ")
+            home = p.get("home_team", "?")
+            away = p.get("away_team", "?")
+            pred = p.get("prediction", "—")
+            rows_html += (
+                f"<tr style='background:{row_bg};'>"
+                f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);color:{left};font-weight:800;'>{status}</td>"
+                f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{ts}</td>"
+                f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{home} vs {away}</td>"
+                f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{pred}</td>"
+                f"</tr>"
+            )
+
+        table_html = (
+            "<table style='width:100%;border-collapse:collapse;margin-top:12px;'>"
+            "<thead><tr>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+            "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+            "</tr></thead>"
+            f"<tbody>{rows_html}</tbody></table>"
+        )
+
+        st.markdown("<div style='margin-top:12px;'><b>Prédictions du jour</b></div>", unsafe_allow_html=True)
+        st.markdown(table_html, unsafe_allow_html=True)
+    else:
+        st.caption("Aucune prédiction enregistrée aujourd'hui.")
+
+    # ── STATISTIQUES SEMAINE EN COURS ─────────────────────────────────────
+    weekly = None
+    try:
+        from modules.top_victories.victory_storage import get_weekly_stats
+        weekly = get_weekly_stats()
+    except Exception:
+        weekly = None
+
+    if weekly:
+        st.markdown("<div style='margin-top:18px;font-weight:700;'>Statistiques cette semaine</div>", unsafe_allow_html=True)
+        w_cells = [
+            ("Sélectionnés", str(weekly["selected"]), "#00d4ff"),
+            ("✅ Gagnés", str(weekly["won"]), "#22c55e"),
+            ("❌ Perdus", str(weekly["lost"]), "#ef4444"),
+            ("Winrate", f"{weekly['winrate']}%", "#a855f7"),
+            ("Profit", f"{weekly['profit']}", "#22c55e" if weekly['profit']>=0 else "#ef4444"),
+        ]
+        cols = st.columns(len(w_cells))
+        for col, (label, value, color) in zip(cols, w_cells):
+            with col:
+                st.markdown(
+                    f"<div style='background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:10px;text-align:center;'>"
+                    f"<div style='font-size:1.1rem;font-weight:900;color:{color};'>{value}</div>"
+                    f"<div style='font-size:0.72rem;color:#9ca3af;margin-top:4px;'>{label}</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Tableau hebdomadaire
+        preds_w = weekly.get("predictions", [])
+        if preds_w:
+            rows_html = ""
+            for p in preds_w:
+                status = p.get("status", "PENDING")
+                if status == "WON":
+                    row_bg = "rgba(34,197,94,0.06)"
+                    left = "#22c55e"
+                elif status == "LOST":
+                    row_bg = "rgba(239,68,68,0.06)"
+                    left = "#ef4444"
+                else:
+                    row_bg = "rgba(255,255,255,0.02)"
+                    left = "#9ca3af"
+                ts = (p.get("timestamp") or "")[:16].replace("T", " ")
+                rows_html += (
+                    f"<tr style='background:{row_bg};'>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);color:{left};font-weight:800;'>{status}</td>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{ts}</td>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{p.get('home_team','')} vs {p.get('away_team','')}</td>"
+                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{p.get('prediction','')}</td>"
+                    f"</tr>"
+                )
+            table_html = (
+                "<table style='width:100%;border-collapse:collapse;margin-top:12px;'>"
+                "<thead><tr>"
+                "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+                "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+                "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+                "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+                "</tr></thead>"
+                f"<tbody>{rows_html}</tbody></table>"
+            )
+            st.markdown(table_html, unsafe_allow_html=True)
+        else:
+            st.caption("Aucune prédiction enregistrée cette semaine.")
 
     # ── Statistiques globales ──────────────────────────────────────────────────
     st.markdown(
