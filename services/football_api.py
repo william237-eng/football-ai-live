@@ -64,8 +64,11 @@ class FootballAPI:
     """
 
     def __init__(self, timeout: int = 10, max_retries: int = 3, backoff_factor: float = 0.3, max_pages: int = 10):
-        self.api_key = get_config("API_KEY")
-        self.api_url = get_config("API_URL")
+        # Backwards-compatible config: prefer generic API_KEY/API_URL but
+        # accept SPORTMONKS_API_KEY / SPORTMONKS_BASE_URL if provided.
+        self.api_key = get_config("API_KEY") or get_config("SPORTMONKS_API_KEY")
+        self.api_url = get_config("API_URL") or get_config("SPORTMONKS_BASE_URL")
+        # Provider can be explicit; default to api-football for legacy behaviour
         self.provider = get_config("API_PROVIDER", "api-football")
 
         if not self.api_key or not self.api_url:
