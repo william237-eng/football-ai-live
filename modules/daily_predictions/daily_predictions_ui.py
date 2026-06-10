@@ -250,7 +250,40 @@ def render_daily_predictions_page(api) -> None:
                 results = fetch_daily_predictions(api)
             except Exception as e:
                 st.error(f"Erreur : {e}")
-                results = {"wins": [], "double_chance": [], "btts": [], "corners_cards": []}
+                # fallback: lire les prédictions migrées depuis la BDD
+                try:
+                    from modules.daily_predictions.db_reads import get_todays_predictions
+                    raw_preds = get_todays_predictions(limit=50)
+                    # Convert raw list into results buckets used by the UI
+                    results = {"wins": [], "double_chance": [], "btts": [], "corners_cards": []}
+                    for p in raw_preds:
+                        market = (p.get("market") or "").upper()
+                        node = {
+                            "home_name": p.get("home_name"),
+                            "away_name": p.get("away_name"),
+                            "league_name": p.get("league_name"),
+                            "league_country": p.get("league_country"),
+                            "start_time": p.get("start_time"),
+                            "prediction": p.get("prediction"),
+                            "pct": p.get("probability_pct", 0.0),
+                            "confidence": p.get("confidence"),
+                            "raw": p.get("raw"),
+                        }
+                        if "YELLOWS" in market or "CARTONS" in market:
+                            results["corners_cards"].append(node)
+                        elif "GG" in market or "BTTS" in market:
+                            results["btts"].append(node)
+                        elif "DOUBLE" in market or "DC" in market:
+                            results["double_chance"].append(node)
+                        else:
+                            # best-effort: push into wins if it looks like a victory market
+                            if "WIN" in market or "VICT" in market:
+                                results["wins"].append(node)
+                            else:
+                                # fallback to btts
+                                results["btts"].append(node)
+                except Exception:
+                    results = {"wins": [], "double_chance": [], "btts": [], "corners_cards": []}
         st.session_state[cache_key] = results
         st.session_state[ts_key]    = now_ts
     else:
@@ -273,37 +306,13 @@ def render_daily_predictions_page(api) -> None:
     # Afficher statistiques réelles simples pour les cartons jaunes (registre persistant)
     try:
         from modules.daily_predictions.prediction_registry import compute_real_stats
+        from modules.shared.stats_ui import render_stats_block
+
         stats_30 = compute_real_stats(days=30)
         stats_7 = compute_real_stats(days=7)
         stats_1 = compute_real_stats(days=1)
 
-        # Affichage : bloc 30j, et deux petits blocs côte-à-côte pour 1j et 7j
-        st.markdown(
-            f"<div style='margin-top:10px;background:rgba(255,255,255,0.03);border-radius:10px;padding:10px;'>"
-            f"<div style='font-weight:800;color:#f59e0b;'>📊 Cartons jaunes — statistiques réelles (30j)</div>"
-            f"<div style='font-size:0.9rem;margin-top:6px;'>Validés: {stats_30['won']} · Échoués: {stats_30['lost']} · En attente: {stats_30['pending']} · Winrate: {stats_30['winrate']}% · ROI: {stats_30['roi']}%</div>"
-            f"</div>", unsafe_allow_html=True
-        )
-
-        # Deux colonnes pour aujourd'hui et dernière semaine
-        col_a, col_b = st.columns([1, 1])
-        with col_a:
-            today_label = datetime.date.today().strftime("%d/%m/%Y")
-            st.markdown(
-                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
-                f"<div style='font-weight:800;color:#fb923c;'>📅 Aujourd'hui — {today_label}</div>"
-                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_1['total_emitted']} · Validés: {stats_1['won']} · Échoués: {stats_1['lost']} · En attente: {stats_1['pending']} · Winrate: {stats_1['winrate']}% · ROI: {stats_1['roi']}%</div>"
-                f"</div>", unsafe_allow_html=True
-            )
-
-        with col_b:
-            week_label = (datetime.date.today() - datetime.timedelta(days=7)).strftime("%d/%m/%Y")
-            st.markdown(
-                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
-                f"<div style='font-weight:800;color:#f97316;'>🗓️ Dernière semaine (7j)</div>"
-                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_7['total_emitted']} · Validés: {stats_7['won']} · Échoués: {stats_7['lost']} · En attente: {stats_7['pending']} · Winrate: {stats_7['winrate']}% · ROI: {stats_7['roi']}%</div>"
-                f"</div>", unsafe_allow_html=True
-            )
+        render_stats_block("📊 Cartons jaunes — statistiques réelles", stats_1, stats_7, stats_30)
     except Exception:
         pass
 

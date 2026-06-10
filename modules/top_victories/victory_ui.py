@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 
 from modules.top_victories.victory_monitor import fetch_top_victories, validate_pending
-from modules.top_victories.victory_storage import init_db, get_all_predictions, get_stats, get_daily_stats, get_prediction_history
+from modules.top_victories.victory_storage import init_db, get_all_predictions, get_stats, get_daily_stats, get_weekly_stats, get_prediction_history
 
 # ─── Cache ───────────────────────────────────────────────────────────────────
 def _fetch_cached(api_key_hash: str, _api) -> List[Dict]:
@@ -466,37 +466,23 @@ def render_top_victories_page(api) -> None:
         unsafe_allow_html=True,
     )
 
-    daily_stats = get_daily_stats()
-    c1, c2, c3, c4, c5 = st.columns(5)
-    cells = [
-        (c1, "Sélectionnés", str(daily_stats["selected"]),   "#00d4ff"),
-        (c2, "✅ Gagnés",    str(daily_stats["won"]),      "#22c55e"),
-        (c3, "❌ Perdus",    str(daily_stats["lost"]),     "#ef4444"),
-        (c4, "Winrate",      f"{daily_stats['winrate']}%", "#a855f7"),
-        (c5, "ROI",          f"{daily_stats['roi']}%",      "#f59e0b"),
-    ]
-    for col, label, value, color in cells:
-        with col:
-            st.markdown(
-                f"<div style='background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);"
-                f"border-radius:12px;padding:12px;text-align:center;'>"
-                f"<div style='font-size:1.4rem;font-weight:900;color:{color};'>{value}</div>"
-                f"<div style='font-size:0.70rem;color:#9ca3af;margin-top:2px;'>{label}</div>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-    
-    # Afficher le profit
-    profit_color = "#22c55e" if daily_stats["profit"] >= 0 else "#ef4444"
-    st.markdown(
-        f"<div style='background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);"
-        f"border-radius:12px;padding:12px;text-align:center;margin-top:8px;'>"
-        f"<div style='font-size:1.2rem;font-weight:900;color:{profit_color};'>"
-        f"{'+' if daily_stats['profit'] >= 0 else ''}{daily_stats['profit']} unités</div>"
-        f"<div style='font-size:0.70rem;color:#9ca3af;margin-top:2px;'>Profit journalier</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    # Afficher statistiques journalières / 7j / 30j via composant partagé
+    try:
+        from modules.shared.stats_ui import render_stats_block
+
+        stats_today = get_daily_stats()
+        stats_week = get_weekly_stats()
+        stats_month = get_stats() or {}
+
+        # Adapter structure attendue par render_stats_block (today, week, month)
+        render_stats_block("📊 Statistiques journalières", stats_today, stats_week, stats_month)
+    except Exception:
+        # fallback minimal display
+        try:
+            daily_stats = get_daily_stats()
+            st.markdown(f"<div>Prédictions aujourd'hui : {daily_stats.get('selected',0)} · Winrate: {daily_stats.get('winrate','--')}%</div>", unsafe_allow_html=True)
+        except Exception:
+            pass
 
     # ── Tableau détaillé des prédictions du jour (avec coloration selon résultat)
     preds = daily_stats.get("predictions", [])

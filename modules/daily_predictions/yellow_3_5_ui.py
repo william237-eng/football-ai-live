@@ -58,36 +58,18 @@ def render_yellow_3_5_page(api) -> None:
         # registre non disponible → continuer
         pass
 
-    # Afficher statistiques réelles (30j + 7j + today)
+    # Afficher statistiques réelles (30j + 7j + today) — usage du composant partagé
     try:
+        from modules.daily_predictions.prediction_registry_yellow_3_5 import compute_real_stats
+        from modules.shared.stats_ui import render_stats_block
+
         stats_30 = compute_real_stats(days=30)
         stats_7 = compute_real_stats(days=7)
         stats_1 = compute_real_stats(days=1)
 
-        st.markdown(
-            f"<div style='margin-top:8px;background:rgba(255,255,255,0.03);border-radius:8px;padding:8px;'>"
-            f"<div style='font-weight:800;color:#fb923c;'>📊 Cartons jaunes +3.5 — statistiques réelles (30j)</div>"
-            f"<div style='font-size:0.9rem;margin-top:6px;'>Validés: {stats_30['won']} · Échoués: {stats_30['lost']} · En attente: {stats_30['pending']} · Winrate: {stats_30['winrate']}% · ROI: {stats_30['roi']}%</div>"
-            f"</div>", unsafe_allow_html=True
-        )
-
-        col_a, col_b = st.columns([1,1])
-        with col_a:
-            today_label = datetime.date.today().strftime("%d/%m/%Y")
-            st.markdown(
-                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
-                f"<div style='font-weight:800;color:#fb923c;'>📅 Aujourd'hui — {today_label}</div>"
-                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_1['total_emitted']} · Validés: {stats_1['won']} · Échoués: {stats_1['lost']} · En attente: {stats_1['pending']} · Winrate: {stats_1['winrate']}% · ROI: {stats_1['roi']}%</div>"
-                f"</div>", unsafe_allow_html=True
-            )
-        with col_b:
-            st.markdown(
-                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
-                f"<div style='font-weight:800;color:#f97316;'>🗓️ Dernière semaine (7j)</div>"
-                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_7['total_emitted']} · Validés: {stats_7['won']} · Échoués: {stats_7['lost']} · En attente: {stats_7['pending']} · Winrate: {stats_7['winrate']}% · ROI: {stats_7['roi']}%</div>"
-                f"</div>", unsafe_allow_html=True
-            )
+        render_stats_block("📊 Cartons jaunes +3.5 — statistiques réelles", stats_1, stats_7, stats_30)
     except Exception:
+        # si le registre n'est pas dispo, on continue silencieusement
         pass
 
     st.markdown("<div style='margin-top:10px;font-size:0.9rem;color:#888;'>Top 20 IA · Probabilités estimées par modèle Poisson · Données API-Football</div>", unsafe_allow_html=True)

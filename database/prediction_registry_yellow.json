@@ -14,11 +14,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 4,
       "timestamp_prediction": "2026-06-04T16:31:18.028361+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:50.101668+00:00"
     },
     "1531367": {
       "fixture_id": 1531367,
@@ -34,11 +34,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.040296+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:51.154976+00:00"
     },
     "1531368": {
       "fixture_id": 1531368,
@@ -54,11 +54,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.048372+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:52.186248+00:00"
     },
     "1504456": {
       "fixture_id": 1504456,
@@ -74,11 +74,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 4,
       "timestamp_prediction": "2026-06-04T16:31:18.053780+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:53.210664+00:00"
     },
     "1546562": {
       "fixture_id": 1546562,
@@ -94,11 +94,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.059733+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:54.235005+00:00"
     },
     "1545728": {
       "fixture_id": 1545728,
@@ -114,11 +114,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.066284+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:55.463356+00:00"
     },
     "1525737": {
       "fixture_id": 1525737,
@@ -134,11 +134,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 1,
       "timestamp_prediction": "2026-06-04T16:31:18.071327+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:56.490843+00:00"
     },
     "1546540": {
       "fixture_id": 1546540,
@@ -154,11 +154,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.077384+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:57.478140+00:00"
     },
     "1532112": {
       "fixture_id": 1532112,
@@ -174,11 +174,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.084089+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:58.533641+00:00"
     },
     "1531370": {
       "fixture_id": 1531370,
@@ -194,11 +194,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 1,
       "timestamp_prediction": "2026-06-04T16:31:18.089319+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:07:59.763698+00:00"
     },
     "1545729": {
       "fixture_id": 1545729,
@@ -214,11 +214,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.095361+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:00.787666+00:00"
     },
     "1510595": {
       "fixture_id": 1510595,
@@ -234,11 +234,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.101758+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:01.812114+00:00"
     },
     "1546561": {
       "fixture_id": 1546561,
@@ -254,11 +254,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.107416+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:02.836451+00:00"
     },
     "1546568": {
       "fixture_id": 1546568,
@@ -274,11 +274,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.115771+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:03.962055+00:00"
     },
     "1510949": {
       "fixture_id": 1510949,
@@ -294,11 +294,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.121719+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:04.984659+00:00"
     },
     "1546539": {
       "fixture_id": 1546539,
@@ -314,11 +314,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 1,
       "timestamp_prediction": "2026-06-04T16:31:18.129557+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:06.112438+00:00"
     },
     "1545543": {
       "fixture_id": 1545543,
@@ -334,11 +334,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 4,
       "timestamp_prediction": "2026-06-04T16:31:18.138102+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:07.237591+00:00"
     },
     "1531369": {
       "fixture_id": 1531369,
@@ -354,11 +354,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.145214+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:08.261324+00:00"
     },
     "1546567": {
       "fixture_id": 1546567,
@@ -374,11 +374,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 0,
       "timestamp_prediction": "2026-06-04T16:31:18.152428+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:09.387938+00:00"
     },
     "1545542": {
       "fixture_id": 1545542,
@@ -394,11 +394,11 @@
       "confidence": "Très faible",
       "score_ia": 0.0,
       "match_type": "unknown",
-      "status": "pending",
-      "result": null,
-      "total_cards_final": null,
+      "status": "validated",
+      "result": "FAILED",
+      "total_cards_final": 4,
       "timestamp_prediction": "2026-06-04T16:31:18.159658+00:00",
-      "timestamp_validated": null
+      "timestamp_validated": "2026-06-08T13:08:10.433351+00:00"
     }
   }
 }
