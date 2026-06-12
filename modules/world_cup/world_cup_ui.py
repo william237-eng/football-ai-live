@@ -32,12 +32,47 @@ from modules.world_cup.prediction_registry_worldcup import (
 # Helper: match filter for World Cup competitions
 WC_KEYWORDS = ("world cup", "worldcup", "fifa world", "fifa world cup")
 
+# Mapping affichage -> clé marché canonique utilisée pour l'enregistrement et les stats
+MARKET_DISPLAY_TO_KEY = {
+    "⚽ VICTOIRES": "VICTOIRE",
+    "🔄 DOUBLE CHANCE": "DOUBLE CHANCE",
+    "➕ OVER 2.5 BUTS": "OVER 2.5 BUTS",
+    "➖ UNDER 2.5 BUTS": "UNDER 2.5 BUTS",
+    "🟨 OVER 2.5 CARTONS JAUNES": "YELLOW_CARDS",
+    "⚪ OVER 7.5 CORNERS": "CORNERS + CARTONS",
+    "🎯 GG — LES DEUX MARQUENT": "GG (BTTS)",
+    "🔴 AU MOINS 1 ROUGE": "RED_CARDS",
+}
 
 def _is_world_cup_league(league_name: str) -> bool:
     if not league_name:
         return False
     ln = league_name.lower()
     return any(k in ln for k in WC_KEYWORDS)
+
+
+def _discover_world_cup_league_ids(api: FootballAPI) -> List[int]:
+    ids = []
+    try:
+        current_year = datetime.date.today().year
+        data = api.get_leagues(current=True, season=current_year)
+        items = []
+        if isinstance(data, dict) and "response" in data:
+            items = data["response"] or []
+        elif isinstance(data, list):
+            items = data
+
+        for item in items:
+            league = item.get("league") if isinstance(item, dict) else item
+            if not isinstance(league, dict):
+                continue
+            name = str(league.get("name", "")).lower()
+            lid = league.get("id")
+            if lid and any(k in name for k in WC_KEYWORDS):
+                ids.append(int(lid))
+    except Exception:
+        pass
+    return sorted(set(ids))
 
 
 def _select_top_unique(results_map: Dict[str, List[Dict[str, Any]]], market_key: str, used_fids: set, limit: int = 7) -> List[Dict[str, Any]]:
@@ -61,13 +96,45 @@ def render_world_cup_page(api: FootballAPI) -> None:
     # Fetch upcoming fixtures (next 200) and filter World Cup leagues
     with st.spinner("Récupération des matchs Coupe du Monde…"):
         try:
-            raw, meta = api.get_fixtures_next_n(n=200)
+            raw, meta = api.get_fixtures_next_n(n=50)
             fixtures = raw or []
         except Exception as e:
             st.error(f"Impossible de récupérer les fixtures: {e}")
             return
 
     wc_fixtures = [f for f in fixtures if _is_world_cup_league(((f.get('league') or {}).get('name') or ''))]
+
+    if not wc_fixtures:
+        # Fallback: récupérer d'abord la compétition principale World Cup (league_id=1)
+        recovered = []
+        seen_fixtures = set()
+        try:
+            direct_raw, _ = api.get_fixtures_next_n(n=50, league_id=1)
+            for fx in direct_raw or []:
+                fid = (fx.get('fixture') or {}).get('id')
+                if fid and fid not in seen_fixtures:
+                    seen_fixtures.add(fid)
+                    recovered.append(fx)
+        except Exception:
+            direct_raw = []
+
+        # Si rien, découvrir les ligues World Cup et récupérer leurs fixtures
+        if not recovered:
+            league_ids = _discover_world_cup_league_ids(api)
+            for lid in league_ids:
+                if lid == 1:
+                    continue
+                try:
+                    raw_league, _ = api.get_fixtures_next_n(n=50, league_id=lid)
+                    for fx in raw_league or []:
+                        fid = (fx.get('fixture') or {}).get('id')
+                        if fid and fid not in seen_fixtures:
+                            seen_fixtures.add(fid)
+                            recovered.append(fx)
+                except Exception:
+                    continue
+
+        wc_fixtures = [f for f in recovered if _is_world_cup_league(((f.get('league') or {}).get('name') or ''))]
 
     if not wc_fixtures:
         st.info("Aucun match Coupe du Monde trouvé dans les prochaines fixtures (vérifie ta configuration API ou augmente la fenêtre).")
@@ -191,14 +258,16 @@ def render_world_cup_page(api: FootballAPI) -> None:
     red_sel = _select_top_unique(results, "red_cards", used, limit=7)
     sections.append(("🔴 AU MOINS 1 ROUGE (Top 7)", red_sel, "#ef4444"))
 
-    # Register displayed predictions in registry
+    # Register displayed predictions in registry (use key marché canonique)
     for title, lst, _ in sections:
         for m in lst:
             try:
                 fid = m.get("fixture_id")
-                market = title.split("(")[0].strip()
-                if fid and not prediction_exists(fid, market):
-                    register_prediction(m, market)
+                market_display = title.split("(")[0].strip()
+                market_key = MARKET_DISPLAY_TO_KEY.get(market_display, market_display)
+                # éviter doublons : vérifier aussi la clé affichée précédente
+                if fid and not (prediction_exists(fid, market_key) or prediction_exists(fid, market_display)):
+                    register_prediction(m, market_key)
             except Exception:
                 continue
 
@@ -207,29 +276,43 @@ def render_world_cup_page(api: FootballAPI) -> None:
 
     # For each section, show stats and matches
     for title, lst, color in sections:
-        market = title.split("(")[0].strip()
+        market_display = title.split("(")[0].strip()
+        market_key = MARKET_DISPLAY_TO_KEY.get(market_display, market_display)
         st.markdown(f"<h3 style='margin-top:12px;color:{color};'>{title}</h3>", unsafe_allow_html=True)
         try:
-            stats_day = compute_real_stats(market=market, days=1)
-            stats_week = compute_real_stats(market=market, days=7)
-            st.markdown(
-                f"<div style='background:rgba(255,255,255,0.03);border-radius:8px;padding:8px;margin-bottom:6px;'>"
-                f"<b>Aujourd'hui</b>: Emis: {stats_day['total_emitted']} · Validés: {stats_day['won']} · Échoués: {stats_day['lost']} · En attente: {stats_day['pending']} · Winrate: {stats_day['winrate']}% · ROI: {stats_day['roi']}%<br/>"
-                f"<b>7j</b>: Emis: {stats_week['total_emitted']} · Validés: {stats_week['won']} · Échoués: {stats_week['lost']} · En attente: {stats_week['pending']} · Winrate: {stats_week['winrate']}% · ROI: {stats_week['roi']}%"
-                f"</div>", unsafe_allow_html=True,
-            )
+            from modules.shared.stats_ui import render_stats_block
+
+            stats_1 = compute_real_stats(market=market_key, days=1)
+            stats_7 = compute_real_stats(market=market_key, days=7)
+            stats_30 = compute_real_stats(market=market_key, days=30)
+
+            render_stats_block(f"📊 {market_display} — statistiques réelles", stats_1, stats_7, stats_30)
         except Exception:
+            # Silencieux si registre/statistiques indisponibles
+            pass
+
+        # Historique des prédictions pour ce marché (résolus)
+        try:
+            from modules.world_cup.prediction_registry_worldcup import get_predictions_by_market
+            from modules.shared.stats_ui import render_prediction_history
+
+            preds = get_predictions_by_market(market_key)
+            if preds:
+                with st.expander(f"📜 Historique — {market_display} (validés / échoués)", expanded=False):
+                    render_prediction_history(f"{market_display} — Historique", preds)
+        except Exception:
+            # continuer silencieusement si registre indisponible
             pass
 
         if not lst:
-            st.info(f"Aucun match pour {market}.")
+            st.info(f"Aucun match pour {market_display}.")
             continue
 
         # Render grid
         try:
             # reuse _render_grid from daily ui
             from modules.daily_predictions.daily_predictions_ui import _render_grid
-            _render_grid(lst, color, f"Aucun match {market}.")
+            _render_grid(lst, color, f"Aucun match {market_display}.")
         except Exception:
             for m in lst:
                 try:

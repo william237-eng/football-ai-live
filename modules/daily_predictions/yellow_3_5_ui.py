@@ -72,6 +72,18 @@ def render_yellow_3_5_page(api) -> None:
         # si le registre n'est pas dispo, on continue silencieusement
         pass
 
+    # Historique des prédictions (validées / échouées)
+    try:
+        from modules.daily_predictions.prediction_registry_yellow_3_5 import get_all_predictions
+        from modules.shared.stats_ui import render_prediction_history
+
+        preds = get_all_predictions()
+        if preds:
+            with st.expander("📜 Historique des prédictions — Cartons jaunes +3.5 (validés / échoués)", expanded=False):
+                render_prediction_history("Cartons jaunes +3.5 — Historique", preds)
+    except Exception:
+        pass
+
     st.markdown("<div style='margin-top:10px;font-size:0.9rem;color:#888;'>Top 20 IA · Probabilités estimées par modèle Poisson · Données API-Football</div>", unsafe_allow_html=True)
 
     if not yellow_list:

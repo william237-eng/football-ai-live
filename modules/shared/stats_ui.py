@@ -4,7 +4,7 @@ stats_ui.py
 Bloc réutilisable d'affichage des statistiques réelles (Aujourd'hui / 7j / 30j)
 Permet d'homogénéiser l'affichage entre les pages (+2.5, -2.5, cartons, victoires, ...)
 """
-from typing import Dict, Any
+from typing import Dict, Any, List
 import streamlit as st
 
 
@@ -12,7 +12,7 @@ def _perf_mini(label: str, m: Dict[str, Any]) -> str:
     # Normalize keys from different modules
     won = m.get("won") or m.get("wins") or 0
     lost = m.get("lost") or m.get("losses") or 0
-    total = m.get("total") or m.get("resolved") or m.get("total_emitted") or 0
+    total = m.get("total") or m.get("resolved") or m.get("total_emitted") or m.get("selected") or 0
     pending = m.get("pending", 0)
     wr = None
     roi = None
@@ -94,4 +94,93 @@ def render_stats_block(title: str, today: Dict[str, Any], week: Dict[str, Any], 
         f"</div>"
     )
     st.markdown(html, unsafe_allow_html=True)
+
+
+def render_prediction_history(title: str, preds: List[Dict[str, Any]], max_items: int = 50) -> None:
+    """Affiche un tableau d'historique des prédictions résolues (validées / échouées).
+    La fonction est tolérante aux différentes structures de registres.
+    """
+    # Filtrer les prédictions résolues
+    resolved = []
+    for p in preds:
+        status = str(p.get("status", "") or "").lower()
+        result = str(p.get("result", "") or "").lower()
+        if status in ("validated", "validated", "won", "lost", "won", "lost"):
+            resolved.append(p)
+        elif result in ("validated", "failed", "won", "lost"):
+            resolved.append(p)
+        elif p.get("timestamp_validated"):
+            resolved.append(p)
+
+    def _ts_key(item: Dict[str, Any]) -> str:
+        return item.get("timestamp_validated") or item.get("timestamp_prediction") or item.get("timestamp") or ""
+
+    resolved_sorted = sorted(resolved, key=lambda i: _ts_key(i) or "", reverse=True)[:max_items]
+
+    if not resolved_sorted:
+        st.markdown(f"<div style='text-align:center;color:#888;padding:10px;'>Aucun historique résolu pour {title}</div>", unsafe_allow_html=True)
+        return
+
+    rows_html = []
+    for p in resolved_sorted:
+        # statut lisible
+        r = p.get("result") or p.get("status") or ""
+        r_low = str(r).lower()
+        if "valid" in r_low or r_low in ("won", "win", "validated"):
+            status_label = "✅ VALIDÉ"
+            status_col = "#22c55e"
+        elif "fail" in r_low or r_low in ("lost", "loss", "failed"):
+            status_label = "❌ ÉCHOUÉ"
+            status_col = "#ef4444"
+        else:
+            status_label = str(r).upper() if r else (str(p.get("status", "")).upper() or "?")
+            status_col = "#9ca3af"
+
+        ts = (p.get("timestamp_validated") or p.get("timestamp_prediction") or p.get("timestamp") or "")[:19].replace("T", " ")
+        home = p.get("home_name") or p.get("home_team") or p.get("home") or "?"
+        away = p.get("away_name") or p.get("away_team") or p.get("away") or "?"
+
+        # détecter score final
+        score_display = ""
+        if p.get("home_score_final") is not None and p.get("away_score_final") is not None:
+            score_display = f"{p.get('home_score_final')} — {p.get('away_score_final')}"
+        elif p.get("total_goals_final") is not None:
+            score_display = f"Total buts: {p.get('total_goals_final')}"
+        elif p.get("total_reds_final") is not None:
+            score_display = f"Total rouges: {p.get('total_reds_final')}"
+        elif p.get("total_cards_final") is not None:
+            score_display = f"Total cartons: {p.get('total_cards_final')}"
+        elif p.get("winner"):
+            score_display = str(p.get("winner"))
+        else:
+            score = p.get("score") or p.get("final_score") or p.get("final") or ""
+            if score:
+                score_display = str(score)
+
+        pred_lbl = p.get("prediction") or p.get("predicted_market") or p.get("prediction_label") or p.get("market") or ""
+
+        rows_html.append(
+            f"<tr style='background:rgba(255,255,255,0.02);'>"
+            f"<td style='padding:8px 10px;color:{status_col};font-weight:800;'>{status_label}</td>"
+            f"<td style='padding:8px 10px;'>{ts}</td>"
+            f"<td style='padding:8px 10px;'>{home} vs {away}</td>"
+            f"<td style='padding:8px 10px;'>{pred_lbl}</td>"
+            f"<td style='padding:8px 10px;text-align:right;'>{score_display}</td>"
+            f"</tr>"
+        )
+
+    table_html = (
+        "<table style='width:100%;border-collapse:collapse;margin-top:8px;font-size:0.9rem;'>"
+        "<thead><tr>"
+        "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
+        "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
+        "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
+        "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
+        "<th style='text-align:right;padding:8px 10px;color:#9ca3af;'>Score final</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(rows_html)}</tbody></table>"
+    )
+
+    st.markdown(f"<div style='margin-top:12px;font-weight:700;color:#a855f7;'>{title}</div>", unsafe_allow_html=True)
+    st.markdown(table_html, unsafe_allow_html=True)
 

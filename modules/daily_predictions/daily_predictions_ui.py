@@ -224,6 +224,18 @@ def render_daily_predictions_page(api) -> None:
     except Exception:
         pass
 
+    # Historique des prédictions (validées / échouées) pour cartons jaunes
+    try:
+        from modules.daily_predictions.prediction_registry import get_all_predictions
+        from modules.shared.stats_ui import render_prediction_history
+
+        preds = get_all_predictions()
+        if preds:
+            with st.expander("📜 Historique des prédictions — Cartons jaunes (validés / échoués)", expanded=False):
+                render_prediction_history("Cartons jaunes — Historique", preds)
+    except Exception:
+        pass
+
     col_ref, col_info = st.columns([1, 3])
     with col_ref:
         force_refresh = st.button("🔄 Actualiser", use_container_width=True, key="daily_refresh")

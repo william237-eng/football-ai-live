@@ -58,36 +58,31 @@ def render_red_cards_page(api) -> None:
         # registre non disponible → continuer
         pass
 
-    # Afficher statistiques réelles (30j + 7j + today)
+    # Afficher statistiques réelles (30j / 7j / Aujourd'hui) via composant partagé
     try:
+        from modules.daily_predictions.prediction_registry_red import compute_real_stats
+        from modules.shared.stats_ui import render_stats_block
+
         stats_30 = compute_real_stats(days=30)
         stats_7 = compute_real_stats(days=7)
         stats_1 = compute_real_stats(days=1)
 
-        st.markdown(
-            f"<div style='margin-top:8px;background:rgba(255,255,255,0.03);border-radius:8px;padding:8px;'>"
-            f"<div style='font-weight:800;color:#ef4444;'>📊 Cartons rouges — statistiques réelles (30j)</div>"
-            f"<div style='font-size:0.9rem;margin-top:6px;'>Validés: {stats_30['won']} · Échoués: {stats_30['lost']} · En attente: {stats_30['pending']} · Winrate: {stats_30['winrate']}% · ROI: {stats_30['roi']}%</div>"
-            f"</div>", unsafe_allow_html=True
-        )
-
-        col_a, col_b = st.columns([1,1])
-        with col_a:
-            today_label = datetime.date.today().strftime("%d/%m/%Y")
-            st.markdown(
-                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
-                f"<div style='font-weight:800;color:#ef4444;'>📅 Aujourd'hui — {today_label}</div>"
-                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_1['total_emitted']} · Validés: {stats_1['won']} · Échoués: {stats_1['lost']} · En attente: {stats_1['pending']} · Winrate: {stats_1['winrate']}% · ROI: {stats_1['roi']}%</div>"
-                f"</div>", unsafe_allow_html=True
-            )
-        with col_b:
-            st.markdown(
-                f"<div style='margin-top:8px;background:rgba(255,255,255,0.02);border-radius:8px;padding:8px;'>"
-                f"<div style='font-weight:800;color:#f97316;'>🗓️ Dernière semaine (7j)</div>"
-                f"<div style='font-size:0.9rem;margin-top:6px;'>Emis: {stats_7['total_emitted']} · Validés: {stats_7['won']} · Échoués: {stats_7['lost']} · En attente: {stats_7['pending']} · Winrate: {stats_7['winrate']}% · ROI: {stats_7['roi']}%</div>"
-                f"</div>", unsafe_allow_html=True
-            )
+        render_stats_block("📊 Cartons rouges — statistiques réelles", stats_1, stats_7, stats_30)
     except Exception:
+        # Ne pas bloquer la page si le registre/statistiques sont indisponibles
+        pass
+
+    # Historique des prédictions (validées / échouées)
+    try:
+        from modules.daily_predictions.prediction_registry_red import get_all_predictions
+        from modules.shared.stats_ui import render_prediction_history
+
+        preds = get_all_predictions()
+        if preds:
+            with st.expander("📜 Historique des prédictions — Cartons rouges (validés / échoués)", expanded=False):
+                render_prediction_history("Cartons rouges — Historique", preds)
+    except Exception:
+        # Ne pas bloquer la page si le registre est indisponible
         pass
 
     st.markdown("<div style='margin-top:10px;font-size:0.9rem;color:#888;'>Top 20 IA · Probabilités estimées par modèle Poisson · Données API-Football</div>", unsafe_allow_html=True)

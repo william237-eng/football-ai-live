@@ -325,59 +325,32 @@ def _render_stats_block() -> None:
     Statistiques basées UNIQUEMENT sur prediction_history_db.
     Winrate = '--' si 0 résolu. ROI réel (Problèmes 2, 4, 5).
     """
-    stats = get_prediction_stats()
-    n       = stats["resolved"]
-    wins    = stats["wins"]
-    losses  = stats["losses"]
-    pending = stats["pending"]
-    wr_str  = stats["winrate_str"]   # "--" si 0 résolu
-    roi     = stats["roi"]           # None si 0 résolu
-    profit  = stats["profit"]
+    try:
+        from modules.top_under25_live.prediction_registry import compute_real_stats
+        from modules.shared.stats_ui import render_stats_block
 
-    if n == 0:
-        st.markdown(
-            "<div style='text-align:center;padding:18px;color:#aaa;"
-            "border:2px dashed rgba(168,85,247,0.15);border-radius:12px;'>"
-            "<div style='font-size:1.2rem;margin-bottom:6px;'>📊</div>"
-            "<b style='color:#a855f7;'>Aucune prédiction résolue</b><br>"
-            f"<span style='font-size:0.76rem;color:#666;'>"
-            f"{pending} en attente · Winrate : -- · ROI : --"
-            "</span></div>",
-            unsafe_allow_html=True,
-        )
+        stats_30 = compute_real_stats(days=30)
+        stats_7 = compute_real_stats(days=7)
+        stats_1 = compute_real_stats(days=1)
+
+        render_stats_block("📊 Statistiques réelles — UNDER 2.5", stats_1, stats_7, stats_30)
         return
-
-    wr_pct  = stats["winrate_pct"]
-    sign    = "+" if (profit or 0) >= 0 else ""
-    wr_col  = "#22c55e" if (wr_pct or 0) >= 55 else "#f59e0b" if (wr_pct or 0) >= 40 else "#ef4444"
-    roi_col = "#22c55e" if (roi or 0) >= 0 else "#ef4444"
-    roi_str = f"{sign}{roi}%" if roi is not None else "--"
-    prof_str = f"{sign}{profit}u" if profit is not None else "--"
-
-    html = (
-        f"<div style='background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.18);"
-        f"border-radius:12px;padding:14px;'>"
-        f"<div style='font-size:0.85rem;font-weight:800;color:#a855f7;text-align:center;margin-bottom:10px;'>"
-        f"📊 STATISTIQUES RÉELLES — PRÉDICTIONS ÉMISES</div>"
-        f"<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:6px;'>"
-        f"<div style='background:rgba(34,197,94,0.1);border-radius:8px;padding:8px;text-align:center;'>"
-        f"<div style='font-size:1.2rem;font-weight:900;color:#22c55e;'>{wins}</div>"
-        f"<div style='font-size:0.65rem;color:#888;'>Gains ✅ (≤2 buts)</div></div>"
-        f"<div style='background:rgba(239,68,68,0.1);border-radius:8px;padding:8px;text-align:center;'>"
-        f"<div style='font-size:1.2rem;font-weight:900;color:#ef4444;'>{losses}</div>"
-        f"<div style='font-size:0.65rem;color:#888;'>Pertes ❌ (3+ buts)</div></div>"
-        f"<div style='background:rgba(255,255,255,0.04);border-radius:8px;padding:8px;text-align:center;'>"
-        f"<div style='font-size:1.2rem;font-weight:900;color:{wr_col};'>{wr_str}</div>"
-        f"<div style='font-size:0.65rem;color:#888;'>Winrate réel</div></div>"
-        f"<div style='background:rgba(255,255,255,0.04);border-radius:8px;padding:8px;text-align:center;'>"
-        f"<div style='font-size:1.2rem;font-weight:900;color:{roi_col};'>{roi_str}</div>"
-        f"<div style='font-size:0.65rem;color:#888;'>ROI réel</div></div>"
-        f"</div>"
-        f"<div style='margin-top:6px;font-size:0.65rem;color:#888;text-align:center;'>"
-        f"Profit : {prof_str} · Cote ref. {REF_ODD} · {n} résolues · {pending} en attente"
-        f"</div></div>"
-    )
-    st.markdown(html, unsafe_allow_html=True)
+    except Exception:
+        # fallback : afficher résumé minimal depuis la session / DB
+        try:
+            from modules.top_under25_live.under25_monitor import get_prediction_stats
+            stats = get_prediction_stats()
+            pending = stats.get("pending", 0)
+            st.markdown(
+                "<div style='text-align:center;padding:18px;color:#aaa;"
+                "border:2px dashed rgba(168,85,247,0.15);border-radius:12px;'>"
+                "<div style='font-size:1.2rem;margin-bottom:6px;'>📊</div>"
+                "<b style='color:#a855f7;'>Statistiques partielles (session)</b><br>"
+                f"<span style='font-size:0.76rem;color:#666;'>{pending} en attente · Winrate : -- · ROI : --</span></div>",
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            st.caption("Statistiques indisponibles.")
 
 
 def _render_prediction_tables() -> None:
@@ -701,17 +674,27 @@ def render_top_under25_page(api) -> None:
         _render_stats_block()
         return
 
-    # ══ SECTION 1 — LIVE ══════════════════════════════════════════════════
-    _section_header("🔴 MATCHS LIVE UNDER 2.5", len(live_matches), "#ef4444", "rgba(239,68,68,0.15)")
+    # ════════════════════════════════════════════════════════════════════
+    # SECTION 1 — MATCHS LIVE SÉLECTIONNÉS
+    # ════════════════════════════════════════════════════════════════════
+    _section_header(
+        "🔵 MATCHS LIVE SÉLECTIONNÉS", len(live_matches),
+        "#ef4444", "rgba(239,68,68,0.15)"
+    )
     if live_matches:
         st.caption(
-            "5' ≤ minute ≤ 75' · ≤2 buts · prob ≥55% · "
-            "UNDER_SCORE ≥55 · ≥2 tirs · ≥1 corner · ≤1 rouge"
+            "Règles : 5' ≤ minute ≤ 75' · < 3 buts · UNDER_SCORE élevé · Prob ≥55%"
         )
-        for _m in live_matches:
-            register_prediction(_m)
-        _render_cards_grid(live_matches, section="live",
-                           empty_msg="Aucun match live ne satisfait les critères.")
+        # Enregistrer les prédictions affichées (session + registre)
+        try:
+            for m in live_matches:
+                try:
+                    register_prediction(m)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        _render_cards_grid(live_matches, section="live", empty_msg="Aucun match live ne satisfait les critères.")
     else:
         st.markdown(
             "<div style='text-align:center;padding:16px;color:#888;"
@@ -720,108 +703,31 @@ def render_top_under25_page(api) -> None:
             unsafe_allow_html=True,
         )
 
-    # ══ SECTION 2 — FUTURS ════════════════════════════════════════════════
-    _section_header("🟣 MATCHS FUTURS UNDER 2.5", len(future_matches), "#a855f7", "rgba(168,85,247,0.15)")
+    # ════════════════════════════════════════════════════════════════════
+    # SECTION 2 — MATCHS FUTURS DU JOUR
+    # ════════════════════════════════════════════════════════════════════
+    _section_header(
+        "🟣 MATCHS FUTURS DU JOUR", len(future_matches),
+        "#a855f7", "rgba(168,85,247,0.15)"
+    )
     if future_matches:
-        st.caption(
-            "prob ≥60% · xG ≤2.8 · avg_goals ≤3.2 · BTTS ≤65% · H2H under ≥40% · UNDER_SCORE ≥55"
-        )
-        for _m in future_matches:
-            register_prediction(_m)
-        _render_cards_grid(future_matches, section="future",
-                           empty_msg="Aucun match futur ne satisfait les critères.")
+        st.caption("Top 5 matchs du jour · Critères stricts · Triés par UNDER_SCORE")
+        try:
+            for m in future_matches:
+                try:
+                    register_prediction(m)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        _render_cards_grid(future_matches, section="future", empty_msg="Aucun match futur ne satisfait les critères.")
     else:
         st.markdown(
             "<div style='text-align:center;padding:16px;color:#888;"
-            "border:2px dashed rgba(168,85,247,0.15);border-radius:12px;font-size:0.84rem;'>"
+            "border:2px dashed rgba(167,139,250,0.15);border-radius:12px;font-size:0.84rem;'>"
             "🟣 Aucun match futur sélectionné pour le moment</div>",
             unsafe_allow_html=True,
         )
-
-    # Afficher les tableaux prédictions après enregistrement des live/futurs
-    try:
-        # Prefer persistent registry (cross-session) — si vide, utiliser session_state
-        try:
-            from modules.top_under25_live.prediction_registry import get_all_predictions
-            all_preds = get_all_predictions()
-        except Exception:
-            all_preds = []
-        if all_preds:
-            preds_today = [p for p in all_preds]
-            preds_week = [p for p in all_preds]
-        else:
-            preds_today = get_predictions(days=1)
-            preds_week = get_predictions(days=7)
-
-        def _row_html(p: dict) -> str:
-            status = p.get('status', 'pending')
-            if status in ('validated',) and p.get('result') == 'VALIDATED':
-                row_bg = 'rgba(34,197,94,0.06)'
-                left = '#22c55e'
-                status_label = 'WON'
-            elif status in ('validated',) and p.get('result') == 'FAILED':
-                row_bg = 'rgba(239,68,68,0.06)'
-                left = '#ef4444'
-                status_label = 'LOST'
-            elif status == 'win':
-                row_bg = 'rgba(34,197,94,0.06)'
-                left = '#22c55e'
-                status_label = 'WON'
-            elif status == 'loss':
-                row_bg = 'rgba(239,68,68,0.06)'
-                left = '#ef4444'
-                status_label = 'LOST'
-            else:
-                row_bg = 'rgba(255,255,255,0.02)'
-                left = '#9ca3af'
-                status_label = 'PENDING'
-            ts = (p.get('timestamp_prediction') or p.get('timestamp',''))[:16].replace('T', ' ')
-            home = p.get('home_name','?')
-            away = p.get('away_name','?')
-            pred = p.get('prediction') or p.get('predicted_market') or 'UNDER 2.5'
-            return (f"<tr style='background:{row_bg};'>"
-                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);color:{left};font-weight:800;'>{status_label}</td>"
-                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{ts}</td>"
-                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{home} vs {away}</td>"
-                    f"<td style='padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);'>{pred}</td>"
-                    f"</tr>")
-
-        # render 'Prédictions du jour' table
-        st.markdown("<div style='margin-top:14px;font-weight:700;'>Prédictions du jour</div>", unsafe_allow_html=True)
-        if preds_today:
-            rows = "".join(_row_html(p) for p in sorted(preds_today, key=lambda x: x.get('timestamp_prediction', x.get('timestamp','')), reverse=True))
-            table_html = ("<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
-                          "<thead><tr>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
-                          "</tr></thead>"
-                          f"<tbody>{rows}</tbody></table>")
-            st.markdown(table_html, unsafe_allow_html=True)
-        else:
-            st.caption("Aucune prédiction émise aujourd'hui.")
-
-        # render 'Statistiques cette semaine' table
-        st.markdown("<div style='margin-top:18px;font-weight:700;'>Statistiques cette semaine</div>", unsafe_allow_html=True)
-        if preds_week:
-            rows = "".join(_row_html(p) for p in sorted(preds_week, key=lambda x: x.get('timestamp_prediction', x.get('timestamp','')), reverse=True))
-            table_html = ("<table style='width:100%;border-collapse:collapse;margin-top:8px;'>"
-                          "<thead><tr>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Statut</th>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Heure</th>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Match</th>"
-                          "<th style='text-align:left;padding:8px 10px;color:#9ca3af;'>Prédiction</th>"
-                          "</tr></thead>"
-                          f"<tbody>{rows}</tbody></table>")
-            st.markdown(table_html, unsafe_allow_html=True)
-        else:
-            st.caption("Aucune prédiction émise ces 7 derniers jours.")
-    except Exception:
-        try:
-            _render_prediction_tables()
-        except Exception:
-            pass
 
     # ══ SECTION 3 — HISTORIQUE ════════════════════════════════════════════
     _section_header(
@@ -855,3 +761,8 @@ def render_top_under25_page(api) -> None:
             "🔴 Matchs live actifs — appuyez sur 🔄 pour actualiser</div>",
             unsafe_allow_html=True,
         )
+    # Tableaux détaillés : aujourd'hui et 7 jours
+    try:
+        _render_detailed_tables()
+    except Exception:
+        pass
